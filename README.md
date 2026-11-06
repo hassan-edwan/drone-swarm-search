@@ -39,6 +39,21 @@ pip install -r requirements.txt   # CPU-only torch is enough
 python -m pytest
 ```
 
+## Running on your own machine
+
+```bash
+git clone https://github.com/hassan-edwan/drone-swarm-search && cd drone-swarm-search
+python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python -m pytest                                        # 11 tests, a few seconds
+bash scripts/run_experiments.sh                         # MAPPO + IPPO, 2 seeds each, in parallel, then evaluation
+```
+
+The env runs on the CPU, one core per run, so a GPU does not help. Each run
+is a separate process: 4 runs in parallel need about 4–8 cores and ~2 GB of
+RAM. At ~250 env steps/s per run, 2M steps take about 2–2.5 hours. Results
+land in `results/m1/results.md`; models in `runs/`.
+
 ## Usage
 
 ```bash
