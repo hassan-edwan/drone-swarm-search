@@ -1,0 +1,10 @@
+[project]
+name = "swarmsearch"
+version = "0.1.0"
+description = "Cooperative drone swarm search for disaster survivors with multi-agent RL"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = ["ignore:No agents present:UserWarning"]

@@ -1,0 +1,42 @@
+"""Compare baselines and trained policies on the same held-out scenarios.
+
+    python scripts/evaluate.py --models runs/mappo/model.pt runs/ippo/model.pt
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from swarmsearch.baselines import Lawnmower, RandomWalk  # noqa: E402
+from swarmsearch.evaluate import CONDITIONS, evaluate, to_markdown  # noqa: E402
+from swarmsearch.mappo import LearnedPolicy, load  # noqa: E402
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--models", nargs="*", default=[])
+    p.add_argument("--episodes", type=int, default=50)
+    p.add_argument("--conditions", nargs="*", default=list(CONDITIONS))
+    p.add_argument("--out", default="results")
+    a = p.parse_args()
+
+    policies = {"lawnmower": Lawnmower(), "random": RandomWalk(seed=0)}
+    for path in a.models:
+        net, cfg = load(path)
+        policies[cfg["algo"]] = LearnedPolicy(net)
+    conds = {c: CONDITIONS[c] for c in a.conditions}
+    res = evaluate(policies, conds, n_episodes=a.episodes)
+
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "results.json").write_text(json.dumps(res, indent=2))
+    md = to_markdown(res)
+    (out / "results.md").write_text(md + "\n")
+    print(md)
+
+
+if __name__ == "__main__":
+    main()
