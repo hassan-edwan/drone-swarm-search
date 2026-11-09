@@ -94,3 +94,22 @@ def test_sampler_ranges():
     for _ in range(200):
         sc = s.sample(rng)
         assert 2 <= sc.n_drones <= 8 and 1 <= sc.n_survivors <= 20 and 0 <= sc.n_zones <= 5
+
+
+def test_full_map_obs_and_net():
+    import torch
+
+    from swarmsearch.env import map_dim
+    from swarmsearch.mappo import ActorCritic, LearnedPolicy
+
+    env = GridSearchEnv(Scenario(n_drones=3), seed=0, full_map=True)
+    obs, _ = env.reset(seed=0)
+    o = next(iter(obs.values()))
+    assert o.shape == (obs_dim() + map_dim(20),)
+    for central in (True, False):
+        net = ActorCritic(20, central, 64, full_map=True)
+        d = net.dist(torch.from_numpy(o[None]), torch.ones(1, 9))
+        assert d.probs.shape == (1, 9)
+    # A full-map policy runs on a plain env (evaluation builds one env for all methods).
+    m = run_episode(GridSearchEnv(Scenario()), LearnedPolicy(net), Scenario(), seed=0)
+    assert 0.0 <= m["found_frac"] <= 1.0

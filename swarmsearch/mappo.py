@@ -1,5 +1,8 @@
 """MAPPO and IPPO for the grid search env.
 
+With full_map=True the actor also sees the whole shared team map, read by a
+small CNN (fix for the coverage plateau of the vector-only policy).
+
 Both use ONE actor network shared by every drone (parameter sharing); each
 drone runs it on its own local observation. They differ only in the critic:
 
@@ -21,7 +24,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .env import MAX_DRONES, N_ACTIONS, GridSearchEnv, obs_dim, state_dim
+from .env import MAP_CHANNELS, MAX_DRONES, N_ACTIONS, GridSearchEnv, map_dim, obs_dim, state_dim
 from .scenario import ScenarioSampler
 
 
@@ -31,13 +34,47 @@ def mlp(inp: int, out: int, hidden: int = 256) -> nn.Sequential:
     )
 
 
+class MapNet(nn.Module):
+    """Vector obs through an MLP branch, full map through a CNN branch."""
+
+    def __init__(self, grid_size: int, out: int, hidden: int = 256):
+        super().__init__()
+        self.g = grid_size
+        self.vec = obs_dim()
+        self.cnn = nn.Sequential(
+            nn.Conv2d(MAP_CHANNELS, 16, 3, padding=1), nn.ReLU(),
+            nn.Conv2d(16, 32, 3, stride=2, padding=1), nn.ReLU(),
+            nn.Conv2d(32, 32, 3, stride=2, padding=1), nn.ReLU(),
+            nn.Flatten(),
+        )
+        with torch.no_grad():
+            n_cnn = self.cnn(torch.zeros(1, MAP_CHANNELS, grid_size, grid_size)).shape[1]
+        self.head = nn.Sequential(
+            nn.Linear(self.vec + n_cnn, hidden), nn.Tanh(),
+            nn.Linear(hidden, hidden), nn.Tanh(), nn.Linear(hidden, out),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        lead = x.shape[:-1]
+        x = x.reshape(-1, x.shape[-1])
+        m = x[:, self.vec :].reshape(-1, MAP_CHANNELS, self.g, self.g)
+        h = torch.cat([x[:, : self.vec], self.cnn(m)], dim=-1)
+        return self.head(h).reshape(*lead, -1)
+
+
 class ActorCritic(nn.Module):
-    def __init__(self, grid_size: int, centralized: bool, hidden: int = 256):
+    def __init__(self, grid_size: int, centralized: bool, hidden: int = 256, full_map: bool = False):
         super().__init__()
         self.centralized = centralized
+        self.full_map = full_map
         o = obs_dim()
-        self.actor = mlp(o, N_ACTIONS, hidden)
-        self.critic = mlp(o + state_dim(grid_size) if centralized else o, 1, hidden)
+        if full_map:
+            self.actor = MapNet(grid_size, N_ACTIONS, hidden)
+            # MAPPO's critic already gets the full global state; IPPO's reads the map with its own CNN.
+            self.critic = mlp(o + state_dim(grid_size), 1, hidden) if centralized else MapNet(grid_size, 1, hidden)
+        else:
+            self.actor = mlp(o, N_ACTIONS, hidden)
+            self.critic = mlp(o + state_dim(grid_size) if centralized else o, 1, hidden)
 
     def dist(self, obs: torch.Tensor, mask: torch.Tensor) -> torch.distributions.Categorical:
         logits = self.actor(obs).masked_fill(mask == 0, -1e9)
@@ -64,6 +101,7 @@ class Config:
     max_grad_norm: float = 0.5
     reward_scale: float = 0.1
     hidden: int = 256
+    full_map: bool = False
     seed: int = 0
     out_dir: str = "runs/mappo"
     sampler: ScenarioSampler = field(default_factory=ScenarioSampler)
@@ -72,21 +110,23 @@ class Config:
 def critic_input(env: GridSearchEnv, obs: np.ndarray, centralized: bool, state=None) -> np.ndarray:
     if not centralized:
         return obs
-    return np.concatenate([env.state() if state is None else state, obs])
+    # The centralized critic takes the global state plus the vector part of the obs.
+    return np.concatenate([env.state() if state is None else state, obs[: obs_dim()]])
 
 
 def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     torch.manual_seed(cfg.seed)
     rng = np.random.default_rng(cfg.seed)
     centralized = cfg.algo == "mappo"
-    envs = [GridSearchEnv(sampler=cfg.sampler, seed=int(rng.integers(1 << 31))) for _ in range(cfg.n_envs)]
+    envs = [GridSearchEnv(sampler=cfg.sampler, seed=int(rng.integers(1 << 31)), full_map=cfg.full_map)
+            for _ in range(cfg.n_envs)]
     g = envs[0].grid_size
-    net = ActorCritic(g, centralized, cfg.hidden)
+    net = ActorCritic(g, centralized, cfg.hidden, cfg.full_map)
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
 
     T, E, A = cfg.rollout_len, cfg.n_envs, MAX_DRONES
-    o_dim = obs_dim()
-    c_dim = o_dim + state_dim(g) if centralized else o_dim
+    o_dim = obs_dim() + (map_dim(g) if cfg.full_map else 0)
+    c_dim = obs_dim() + state_dim(g) if centralized else o_dim
     buf = {
         "obs": np.zeros((T, E, A, o_dim), np.float32),
         "cin": np.zeros((T, E, A, c_dim), np.float32),
@@ -233,7 +273,7 @@ def save(net: ActorCritic, cfg: Config, path: Path):
 def load(path: str | Path) -> tuple[ActorCritic, dict]:
     ck = torch.load(path, weights_only=False)
     cfg = ck["config"]
-    net = ActorCritic(cfg["sampler"]["grid_size"], cfg["algo"] == "mappo", cfg["hidden"])
+    net = ActorCritic(cfg["sampler"]["grid_size"], cfg["algo"] == "mappo", cfg["hidden"], cfg.get("full_map", False))
     net.load_state_dict(ck["state_dict"])
     net.eval()
     return net, cfg
@@ -254,7 +294,7 @@ class LearnedPolicy:
         agents = list(env.agents)
         if not agents:
             return {}
-        o = torch.from_numpy(np.stack([env._obs(a) for a in agents]))
+        o = torch.from_numpy(np.stack([env._obs(a, full_map=self.net.full_map) for a in agents]))
         m = torch.from_numpy(np.stack([env.action_mask(a) for a in agents]).astype(np.float32))
         with torch.no_grad():
             d = self.net.dist(o, m)

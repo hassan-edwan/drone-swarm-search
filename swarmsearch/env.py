@@ -38,11 +38,17 @@ MAX_DRONES = 8
 PATCH_RADIUS = 2
 COARSE = 5
 N_TEAMMATES = 2
+# Full shared-map view (optional): freshness, belief, obstacles, self, teammates.
+MAP_CHANNELS = 5
 
 
 def obs_dim(patch_radius: int = PATCH_RADIUS, coarse: int = COARSE) -> int:
     side = 2 * patch_radius + 1
     return 4 * side * side + 2 * coarse * coarse + 4 + 3 * N_TEAMMATES + PROFILE_DIM
+
+
+def map_dim(grid_size: int) -> int:
+    return MAP_CHANNELS * grid_size * grid_size
 
 
 def state_dim(grid_size: int) -> int:
@@ -58,6 +64,7 @@ class GridSearchEnv(ParallelEnv):
         sampler: ScenarioSampler | None = None,
         max_drones: int = MAX_DRONES,
         seed: int | None = None,
+        full_map: bool = False,
     ):
         if scenario is None and sampler is None:
             scenario = Scenario()
@@ -67,7 +74,8 @@ class GridSearchEnv(ParallelEnv):
         self.grid_size = grid
         self.possible_agents = [f"drone_{i}" for i in range(max_drones)]
         self.rng = np.random.default_rng(seed)
-        self._obs_dim = obs_dim()
+        self.full_map = full_map
+        self._obs_dim = obs_dim() + (map_dim(grid) if full_map else 0)
         self._state_dim = state_dim(grid)
         self.agents: list[str] = []
 
@@ -329,7 +337,9 @@ class GridSearchEnv(ParallelEnv):
         # Scale so that a uniform prior reads 1.0 per free cell.
         return np.clip(self.belief * self.n_free, 0.0, 5.0)
 
-    def _obs(self, a) -> np.ndarray:
+    def _obs(self, a, full_map: bool | None = None) -> np.ndarray:
+        """Local observation. With full_map, the whole shared team map is
+        appended as MAP_CHANNELS flattened g x g channels."""
         sc = self.scenario
         g = self.grid_size
         x, y = (int(v) for v in self.pos[a])
@@ -358,6 +368,11 @@ class GridSearchEnv(ParallelEnv):
             mate_feats[3 * i : 3 * i + 3] = (d[0] / g, d[1] / g, 1.0)
         parts.append(mate_feats)
         parts.append(sc.observed_profile().as_vector(sc.profile_known))
+        if self.full_map if full_map is None else full_map:
+            me = np.zeros((g, g))
+            me[y, x] = 1.0
+            parts += [fresh.ravel(), (dens / 5.0).ravel(), self.obstacles.ravel().astype(float),
+                      me.ravel(), mates.ravel()]
         return np.concatenate(parts).astype(np.float32)
 
     def state(self) -> np.ndarray:
