@@ -1,0 +1,34 @@
+| Condition | Method | Time to 90% (steps) | Reached 90% | Found | Coverage | Repeats | Collisions |
+|---|---|---|---|---|---|---|---|
+| default | lawnmower | 179 ± 35 | 34% | 81% | 100% | 0% | 0.0 |
+| default | random | 195 ± 25 | 4% | 45% | 46% | 35% | 5.1 |
+| default | mappo | 171 ± 43 | 42% | 81% | 90% | 0% | 0.5 |
+| default | ippo | 177 ± 35 | 46% | 82% | 87% | 1% | 0.0 |
+| no_zones | lawnmower | 182 ± 27 | 38% | 82% | 100% | 0% | 0.0 |
+| no_zones | random | 200 ± 0 | 0% | 42% | 47% | 35% | 3.8 |
+| no_zones | mappo | 182 ± 31 | 40% | 81% | 90% | 0% | 0.0 |
+| no_zones | ippo | 190 ± 19 | 34% | 80% | 91% | 1% | 0.6 |
+| still | lawnmower | 161 ± 38 | 66% | 88% | 98% | 0% | 0.0 |
+| still | random | 198 ± 10 | 4% | 44% | 46% | 35% | 4.1 |
+| still | mappo | 159 ± 42 | 66% | 88% | 86% | 1% | 0.3 |
+| still | ippo | 160 ± 42 | 60% | 85% | 88% | 1% | 0.4 |
+| drift_known | lawnmower | 176 ± 32 | 56% | 85% | 99% | 0% | 0.0 |
+| drift_known | random | 200 ± 0 | 0% | 36% | 46% | 24% | 4.6 |
+| drift_known | mappo | 177 ± 47 | 22% | 77% | 82% | 0% | 0.7 |
+| drift_known | ippo | 181 ± 34 | 38% | 76% | 82% | 1% | 0.0 |
+| drift_default | lawnmower | 176 ± 32 | 56% | 85% | 99% | 0% | 0.0 |
+| drift_default | random | 200 ± 3 | 4% | 34% | 45% | 36% | 4.4 |
+| drift_default | mappo | 182 ± 33 | 30% | 77% | 89% | 0% | 0.3 |
+| drift_default | ippo | 175 ± 42 | 40% | 80% | 88% | 1% | 0.1 |
+| drone_lost | lawnmower | 187 ± 27 | 28% | 75% | 91% | 0% | 0.0 |
+| drone_lost | random | 196 ± 17 | 8% | 44% | 41% | 35% | 3.6 |
+| drone_lost | mappo | 181 ± 34 | 32% | 80% | 82% | 0% | 0.0 |
+| drone_lost | ippo | 183 ± 29 | 34% | 77% | 81% | 1% | 0.5 |
+| 6_drones | lawnmower | 114 ± 41 | 96% | 97% | 100% | 1% | 0.0 |
+| 6_drones | random | 190 ± 30 | 14% | 66% | 65% | 39% | 20.8 |
+| 6_drones | mappo | 99 ± 40 | 98% | 97% | 96% | 1% | 1.3 |
+| 6_drones | ippo | 110 ± 44 | 96% | 97% | 96% | 2% | 1.3 |
+| random_mix | lawnmower | 148 ± 53 | 68% | 88% | 97% | 4% | 1.4 |
+| random_mix | random | 194 ± 22 | 8% | 51% | 55% | 43% | 14.5 |
+| random_mix | mappo | 144 ± 59 | 56% | 87% | 88% | 6% | 0.6 |
+| random_mix | ippo | 145 ± 59 | 58% | 87% | 86% | 7% | 1.2 |
