@@ -106,18 +106,19 @@ ARGS="--guide heuristic" TAG=guided sbatch scripts/hpc/train.sbatch   # set --ac
 - **Grid:** 20 × 20 cells of 10 m (a 200 m × 200 m zone); one step ≈ 1 s.
 - **Actions:** move to one of 8 neighbouring cells, or hover. Moves into walls or obstacles are masked.
 - **Search:** the camera searches the cell under the drone and finds each survivor there with the detection probability.
-- **Reward (per drone):** +1 × staleness of the searched cell (1 for a never-searched cell); −0.5 for searching a fresh cell; +10 to every drone per survivor found by anyone; −10 per drone-drone collision; −0.01 per step.
+- **Reward (per drone):** the survivor probability mass its search detects (scaled so an unsearched cell with a uniform prior pays about the detection probability); +10 to every drone per survivor found by anyone; −0.01 per step. Collisions cannot happen (shield).
 - **Observation (per drone, 167 values):** 5 × 5 local patches of freshness, belief (expected survivors), obstacles and teammates; a coarse 5 × 5 summary of the whole map's freshness and belief (the shared team map); own position, battery, time; the two nearest teammates; the scenario profile.
 - **Global state (critic only):** full maps, including true survivor positions, plus scenario info.
-- **Belief and staleness:** the belief starts as the prior heat map, drops where a cell is searched, and spreads according to the movement profile the drones were given. Searched cells go stale at the profile's movement rate, so re-checks pay off only when survivors are expected to move.
+- **Belief:** the expected undetected survivor mass per cell. It starts as the prior heat map, drops by the detection probability where a cell is searched, and each step moves with the exact transition model of the movement profile the drones were given (wrong when the operator set nothing). Survivors move with the same model under the true profile, so with a known profile the belief is exact.
+- **Movement:** still; wander (random walk); drift (80% of moves one way, e.g. flood water); to_safety (80% of moves toward a safe point). Speed sets how often a survivor changes cell (1 m/s = 10% of steps).
 
 ### Scenario variables (`ScenarioSampler`)
 
 | Variable | Range | Default | Do drones know it? |
 |---|---|---|---|
 | Survivors | 1–20 | 10 | No, only those found |
-| Movement | still, drift, wander; 0–0.5 m/s | slow wander (0.2 m/s) | Only if the operator sets it; otherwise they get the default profile |
-| Likely zones | 0–5 | 3 | Yes, as the prior heat map |
+| Movement | still, wander, drift, to_safety; 0.3–1.5 m/s | wander at 0.5 m/s | Only if the operator sets it; otherwise they get the default profile |
+| Likely zones | none in 60% of scenarios, else 1–5 | 3 | Yes, as the prior heat map |
 | Zone accuracy | 50–100% of survivors in zones | 80% | No |
 | Obstacles | 0–30% of cells | 0 (M1) | Nearby cells only |
 | Drones | 2–8, one may fail | 3 | Nearby teammates only |
@@ -125,8 +126,11 @@ ARGS="--guide heuristic" TAG=guided sbatch scripts/hpc/train.sbatch   # set --ac
 
 ### Test conditions (`swarmsearch/evaluate.py`)
 
-`default`, `no_zones`, `still`, `drift_known`, `drift_default`, `drone_lost`,
-`6_drones`, `random_mix`. Every method runs on the same seeds.
+`still`, `wander`, `drift_known`, `drift_unknown`, `to_safety_known`,
+`to_safety_unknown`, `zones_wander`, `drone_lost`, `6_drones`, `random_mix`
+(no likely zones unless named; movement at 1 m/s; drift direction and safe
+point vary per episode). `--sweep` adds drift at 0, 0.5, 1 and 1.5 m/s.
+Every method runs on the same seeds.
 
 Metrics: time to 90% found (steps; the episode length if never reached), share
 of episodes reaching 90%, fraction found, coverage, repeat fraction, collisions.

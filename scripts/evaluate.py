@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from swarmsearch.baselines import Lawnmower, RandomWalk  # noqa: E402
 from swarmsearch.guide import make_guide  # noqa: E402
-from swarmsearch.evaluate import CONDITIONS, evaluate, to_markdown  # noqa: E402
+from swarmsearch.evaluate import ALL_CONDITIONS, CONDITIONS, SPEED_SWEEP, evaluate, to_markdown  # noqa: E402
 from swarmsearch.mappo import LearnedPolicy, load  # noqa: E402
 
 
@@ -20,7 +20,9 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--models", nargs="*", default=[])
     p.add_argument("--episodes", type=int, default=50)
-    p.add_argument("--conditions", nargs="*", default=list(CONDITIONS))
+    p.add_argument("--conditions", nargs="*", default=None, choices=list(ALL_CONDITIONS),
+                   help="default: all main conditions (plus the speed sweep with --sweep)")
+    p.add_argument("--sweep", action="store_true", help="also run the survivor-speed sweep")
     p.add_argument("--out", default="results")
     p.add_argument("--guide", default=None, help="override the guide a model was trained with")
     a = p.parse_args()
@@ -35,7 +37,8 @@ def main():
         if guide is not None:
             name += "_guided"
         policies[name] = LearnedPolicy(net, guide=guide, guide_every=cfg.get("guide_every", 25))
-    conds = {c: CONDITIONS[c] for c in a.conditions}
+    names = a.conditions or list(CONDITIONS) + (list(SPEED_SWEEP) if a.sweep else [])
+    conds = {c: ALL_CONDITIONS[c] for c in names}
     res = evaluate(policies, conds, n_episodes=a.episodes)
 
     out = Path(a.out)

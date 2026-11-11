@@ -201,3 +201,57 @@ def test_sampler_mostly_no_zones():
     rng = np.random.default_rng(0)
     frac = np.mean([s.sample(rng).n_zones == 0 for _ in range(2000)])
     assert 0.55 < frac < 0.65
+
+
+@pytest.mark.parametrize("prof", [
+    MovementProfile("wander", 1.0),
+    MovementProfile("drift", 1.5, (1, 0)),
+    MovementProfile("to_safety", 1.0, target=(15, 4)),
+])
+def test_belief_tracks_true_survivor_movement(prof):
+    """With the true profile known, the belief map is the exact expected
+    distribution of survivors: check against Monte Carlo."""
+    sc = Scenario(n_drones=2, n_survivors=20, n_zones=0, movement=prof, profile_known=True,
+                  obstacle_frac=0.1, detection_prob=0.6)
+    env = GridSearchEnv(sc, seed=0)
+    env.reset(seed=0)
+    T = env._T_true
+    assert np.allclose(T.sum(1), 1.0)
+    g = env.grid_size
+    start = np.zeros(g * g)
+    x0, y0 = 4, 10
+    env.free[y0, x0] = True
+    start[y0 * g + x0] = 1.0
+    env.belief = start.reshape(g, g).copy()
+    env._decay = prof.move_prob
+    for _ in range(30):
+        env._spread_belief()
+    counts = np.zeros(g * g)
+    env.found[:] = False
+    for _ in range(300):
+        env.survivors[:] = (x0, y0)
+        for _ in range(30):
+            env._move_survivors()
+        for x, y in env.survivors:
+            counts[y * g + x] += 1
+    emp = counts / counts.sum()
+    assert 0.5 * np.abs(emp - env.belief.ravel()).sum() < 0.08  # total variation distance
+
+
+def test_to_safety_survivors_end_at_safe_point():
+    sc = Scenario(n_survivors=10, n_zones=0, movement=MovementProfile("to_safety", 1.5, target=(15, 4)))
+    env = GridSearchEnv(sc, seed=1)
+    env.reset(seed=1)
+    d0 = np.abs(env.survivors - [15, 4]).max(1).mean()
+    for _ in range(150):
+        env._move_survivors()
+    assert np.abs(env.survivors - [15, 4]).max(1).mean() < d0 / 3
+
+
+def test_reward_is_detected_belief_mass():
+    env = GridSearchEnv(Scenario(n_drones=2, n_survivors=1, n_zones=0, detection_prob=0.8), seed=0)
+    env.reset(seed=0)
+    x, y = env.pos["drone_0"]
+    env.belief[y, x] = 0.01
+    r, _ = env._search("drone_0")
+    assert np.isclose(r, 0.01 * 0.8 * env.n_free) and np.isclose(env.belief[y, x], 0.002)

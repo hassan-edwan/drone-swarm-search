@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from .env import GridSearchEnv
-from .scenario import MovementProfile, Scenario, ScenarioSampler
+from .scenario import DRIFT_DIRS, MovementProfile, Scenario, ScenarioSampler
 
 # Named test conditions. Each is a function seed -> Scenario so that every
 # method sees exactly the same missions.
@@ -14,16 +14,35 @@ def _sampled(**kw):
     return lambda seed: sampler.sample(np.random.default_rng(10_000 + seed))
 
 
+def _mv(kind: str, speed: float, known: bool, n_zones: int = 0, **kw):
+    """Drift direction and safe point vary with the episode seed, so no fixed
+    sweep pattern is lined up with the movement by luck."""
+    def make(seed: int) -> Scenario:
+        rng = np.random.default_rng(20_000 + seed)
+        drift = DRIFT_DIRS[rng.integers(len(DRIFT_DIRS))] if kind == "drift" else (0, 0)
+        target = tuple(int(v) for v in rng.integers(0, 20, size=2)) if kind == "to_safety" else (0, 0)
+        return Scenario(movement=MovementProfile(kind, speed, drift, target), profile_known=known,
+                        n_zones=n_zones, **kw)
+    return make
+
+
+# Most conditions have no likely zones: survivors could be anywhere.
 CONDITIONS = {
-    "default": lambda seed: Scenario(),
-    "no_zones": lambda seed: Scenario(n_zones=0),
-    "still": lambda seed: Scenario(movement=MovementProfile("still", 0.0)),
-    "drift_known": lambda seed: Scenario(movement=MovementProfile("drift", 0.4, (1, 0)), profile_known=True),
-    "drift_default": lambda seed: Scenario(movement=MovementProfile("drift", 0.4, (1, 0)), profile_known=False),
-    "drone_lost": lambda seed: Scenario(drone_failure=True),
-    "6_drones": lambda seed: Scenario(n_drones=6),
+    "still": _mv("still", 0.0, True),
+    "wander": _mv("wander", 1.0, False),
+    "drift_known": _mv("drift", 1.0, True),
+    "drift_unknown": _mv("drift", 1.0, False),
+    "to_safety_known": _mv("to_safety", 1.0, True),
+    "to_safety_unknown": _mv("to_safety", 1.0, False),
+    "zones_wander": _mv("wander", 0.5, False, n_zones=3),
+    "drone_lost": _mv("wander", 1.0, False, drone_failure=True),
+    "6_drones": _mv("drift", 1.0, True, n_drones=6),
     "random_mix": _sampled(),
 }
+
+# Does the advantage grow with survivor speed? Drift (random direction), known profile.
+SPEED_SWEEP = {f"drift_{v:.1f}mps": _mv("drift", v, True) for v in (0.0, 0.5, 1.0, 1.5)}
+ALL_CONDITIONS = {**CONDITIONS, **SPEED_SWEEP}
 
 
 def run_episode(env: GridSearchEnv, policy, scenario: Scenario, seed: int) -> dict:

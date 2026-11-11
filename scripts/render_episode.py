@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from swarmsearch.baselines import Lawnmower, RandomWalk  # noqa: E402
 from swarmsearch.env import GridSearchEnv  # noqa: E402
-from swarmsearch.evaluate import CONDITIONS  # noqa: E402
+from swarmsearch.evaluate import ALL_CONDITIONS as CONDITIONS  # noqa: E402
 from swarmsearch.mappo import LearnedPolicy, load  # noqa: E402
 
 COLORS = ["#2D5F8B", "#2A8C82", "#7A4FA0", "#A9481A", "#4A7A2A", "#8B2D5F", "#5F5F5F", "#B08A1A"]
@@ -29,7 +29,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--policy", choices=["lawnmower", "random"], default="lawnmower")
     p.add_argument("--model", default=None)
-    p.add_argument("--condition", default="default", choices=list(CONDITIONS))
+    p.add_argument("--condition", default="drift_known", choices=list(CONDITIONS))
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--steps", type=int, default=None, help="stop early, e.g. to show 20 moves")
     p.add_argument("--out", default="episode.png")
