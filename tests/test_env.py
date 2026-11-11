@@ -106,10 +106,35 @@ def test_full_map_obs_and_net():
     obs, _ = env.reset(seed=0)
     o = next(iter(obs.values()))
     assert o.shape == (obs_dim() + map_dim(20),)
-    for central in (True, False):
-        net = ActorCritic(20, central, 64, full_map=True)
-        d = net.dist(torch.from_numpy(o[None]), torch.ones(1, 9))
-        assert d.probs.shape == (1, 9)
+    for arch in ("cnn", "transformer"):
+        for central in (True, False):
+            net = ActorCritic(20, central, 64, arch=arch)
+            d = net.dist(torch.from_numpy(o[None]), torch.ones(1, 9))
+            assert d.probs.shape == (1, 9)
+            if not central:
+                assert net.value(torch.from_numpy(o[None])).shape == (1,)
     # A full-map policy runs on a plain env (evaluation builds one env for all methods).
     m = run_episode(GridSearchEnv(Scenario()), LearnedPolicy(net), Scenario(), seed=0)
     assert 0.0 <= m["found_frac"] <= 1.0
+
+
+def test_transformer_patch_tokens_keep_cell_positions():
+    """Each map cell lands in the right patch token: marking one cell changes
+    only the token that covers it."""
+    import torch
+
+    from swarmsearch.env import MAP_CHANNELS
+    from swarmsearch.mappo import MapTransformer
+
+    net = MapTransformer(20, 9, patch=4)
+    x = torch.zeros(1, obs_dim() + MAP_CHANNELS * 400)
+    toks0 = None
+    captured = {}
+    net.patch_embed.register_forward_hook(lambda m, i, o: captured.__setitem__("in", i[0]))
+    net(x)
+    toks0 = captured["in"].clone()
+    cell_y, cell_x = 6, 13  # tile row 1, tile col 3 -> token 1 * 5 + 3 = 8
+    x[0, obs_dim() + 3 * 400 + cell_y * 20 + cell_x] = 1.0  # channel 3 (self)
+    net(x)
+    changed = (captured["in"] != toks0).any(-1)[0].nonzero().flatten().tolist()
+    assert changed == [8]

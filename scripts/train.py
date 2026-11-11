@@ -23,7 +23,12 @@ def main():
     p.add_argument("--envs", type=int, default=8)
     p.add_argument("--grid", type=int, default=20)
     p.add_argument("--obstacles", type=float, default=0.0, help="max obstacle fraction (M2: 0.3)")
-    p.add_argument("--full-map", action="store_true", help="actor also sees the whole shared map (CNN)")
+    p.add_argument("--arch", choices=["mlp", "cnn", "transformer"], default="mlp",
+                   help="actor: local vector only (mlp), + full map via CNN, or + full map via transformer")
+    p.add_argument("--full-map", action="store_true", help="same as --arch cnn (kept for old commands)")
+    p.add_argument("--tf-layers", type=int, default=2)
+    p.add_argument("--tf-dim", type=int, default=64)
+    p.add_argument("--device", default="cpu", help="cpu or cuda")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--out", default=None)
@@ -34,7 +39,10 @@ def main():
         algo=a.algo,
         total_env_steps=a.steps,
         n_envs=a.envs,
-        full_map=a.full_map,
+        arch="cnn" if a.full_map else a.arch,
+        tf_layers=a.tf_layers,
+        tf_d_model=a.tf_dim,
+        device=a.device,
         seed=a.seed,
         out_dir=a.out or f"runs/{a.algo}",
         sampler=ScenarioSampler(grid_size=a.grid, obstacle_frac=(0.0, a.obstacles)),

@@ -61,6 +61,9 @@ land in `results/m1/results.md`; models in `runs/`.
 python scripts/train.py --algo mappo --steps 2000000 --out runs/mappo
 python scripts/train.py --algo ippo  --steps 2000000 --out runs/ippo
 
+# Actor architecture: local vector only (default), + full map via CNN, or via transformer
+python scripts/train.py --algo mappo --arch transformer --steps 2000000 --out runs/mappo_tf
+
 # M2: same, with up to 30% of cells blocked
 python scripts/train.py --algo mappo --obstacles 0.3 --out runs/mappo_m2
 
@@ -69,6 +72,24 @@ python scripts/evaluate.py --models runs/mappo/model.pt runs/ippo/model.pt --epi
 
 # Picture of one episode
 python scripts/render_episode.py --model runs/mappo/model.pt --condition drift_known --out mappo.png
+```
+
+## Policy architectures (`--arch`)
+
+| Arch | What the actor sees | How it reads it |
+|---|---|---|
+| `mlp` | local 5×5 patches, coarse 5×5 map summary, own state, nearest teammates, scenario profile | MLP |
+| `cnn` | the above + the full 20×20 shared team map | CNN on the map, MLP on the rest |
+| `transformer` | the same as `cnn` | map cut into 4×4 tiles = 25 tokens, plus a self token; a 2-layer transformer encoder lets the drone's token attend over every region before the action head |
+
+All three use the same PPO trainer and the MAPPO/IPPO critics, so results are directly comparable.
+
+## Running on an HPC cluster (Slurm, e.g. Zaratan)
+
+```bash
+# edit --account in both files first
+jid=$(sbatch --parsable scripts/hpc/train_array.sbatch)      # 2 algos x 3 archs x 3 seeds = 18 jobs
+sbatch --dependency=afterok:$jid scripts/hpc/evaluate.sbatch
 ```
 
 ## The environment

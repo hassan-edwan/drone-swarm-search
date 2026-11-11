@@ -26,7 +26,8 @@ def main():
     policies = {"lawnmower": Lawnmower(), "random": RandomWalk(seed=0)}
     for path in a.models:
         net, cfg = load(path)
-        name = cfg["algo"] + ("_map" if cfg.get("full_map") else "")
+        arch = cfg.get("arch") or ("cnn" if cfg.get("full_map") else "mlp")
+        name = cfg["algo"] + ("" if arch == "mlp" else f"_{arch}")
         policies[name] = LearnedPolicy(net)
     conds = {c: CONDITIONS[c] for c in a.conditions}
     res = evaluate(policies, conds, n_episodes=a.episodes)

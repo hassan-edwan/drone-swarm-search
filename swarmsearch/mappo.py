@@ -1,7 +1,11 @@
 """MAPPO and IPPO for the grid search env.
 
-With full_map=True the actor also sees the whole shared team map, read by a
-small CNN (fix for the coverage plateau of the vector-only policy).
+Actor architectures (Config.arch):
+- "mlp":         local vector obs only.
+- "cnn":         + the whole shared team map, read by a small CNN.
+- "transformer": + the whole map, cut into patch tokens; a transformer
+                 encoder lets the drone's own token attend over every map
+                 region and its own state before choosing an action.
 
 Both use ONE actor network shared by every drone (parameter sharing); each
 drone runs it on its own local observation. They differ only in the critic:
@@ -62,16 +66,66 @@ class MapNet(nn.Module):
         return self.head(h).reshape(*lead, -1)
 
 
+class MapTransformer(nn.Module):
+    """Transformer over [self token, map patch tokens].
+
+    The g x g map (MAP_CHANNELS channels) is cut into patch x patch tiles; each
+    tile becomes one token (linear embedding + learned position). The drone's
+    vector obs becomes the self token. After the encoder, the self token,
+    which has attended over every region, feeds the output head.
+    """
+
+    def __init__(self, grid_size: int, out: int, d_model: int = 64, n_layers: int = 2,
+                 n_heads: int = 4, patch: int = 4):
+        super().__init__()
+        assert grid_size % patch == 0, "grid size must be a multiple of the patch size"
+        self.g, self.p = grid_size, patch
+        self.vec = obs_dim()
+        n_tok = (grid_size // patch) ** 2
+        self.self_embed = nn.Linear(self.vec, d_model)
+        self.patch_embed = nn.Linear(MAP_CHANNELS * patch * patch, d_model)
+        self.pos = nn.Parameter(torch.zeros(1, n_tok + 1, d_model))
+        nn.init.normal_(self.pos, std=0.02)
+        layer = nn.TransformerEncoderLayer(d_model, n_heads, 4 * d_model, dropout=0.0,
+                                           batch_first=True, norm_first=True)
+        self.encoder = nn.TransformerEncoder(layer, n_layers, enable_nested_tensor=False)
+        self.norm = nn.LayerNorm(d_model)
+        self.head = nn.Sequential(nn.Linear(d_model, d_model), nn.Tanh(), nn.Linear(d_model, out))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        lead = x.shape[:-1]
+        x = x.reshape(-1, x.shape[-1])
+        b, g, p = x.shape[0], self.g, self.p
+        m = x[:, self.vec :].reshape(b, MAP_CHANNELS, g // p, p, g // p, p)
+        m = m.permute(0, 2, 4, 1, 3, 5).reshape(b, (g // p) ** 2, -1)  # tiles, row-major
+        tok = torch.cat([self.self_embed(x[:, None, : self.vec]), self.patch_embed(m)], dim=1)
+        h = self.encoder(tok + self.pos)
+        return self.head(self.norm(h[:, 0])).reshape(*lead, -1)
+
+
+def make_body(arch: str, grid_size: int, out: int, hidden: int, tf: dict | None = None) -> nn.Module:
+    if arch == "mlp":
+        return mlp(obs_dim(), out, hidden)
+    if arch == "cnn":
+        return MapNet(grid_size, out, hidden)
+    if arch == "transformer":
+        return MapTransformer(grid_size, out, **(tf or {}))
+    raise ValueError(arch)
+
+
 class ActorCritic(nn.Module):
-    def __init__(self, grid_size: int, centralized: bool, hidden: int = 256, full_map: bool = False):
+    def __init__(self, grid_size: int, centralized: bool, hidden: int = 256, arch: str = "mlp",
+                 tf: dict | None = None):
         super().__init__()
         self.centralized = centralized
-        self.full_map = full_map
+        self.arch = arch
+        self.full_map = arch != "mlp"
         o = obs_dim()
-        if full_map:
-            self.actor = MapNet(grid_size, N_ACTIONS, hidden)
-            # MAPPO's critic already gets the full global state; IPPO's reads the map with its own CNN.
-            self.critic = mlp(o + state_dim(grid_size), 1, hidden) if centralized else MapNet(grid_size, 1, hidden)
+        if self.full_map:
+            self.actor = make_body(arch, grid_size, N_ACTIONS, hidden, tf)
+            # MAPPO's critic already gets the full global state; IPPO's reads the map with its own body.
+            self.critic = (mlp(o + state_dim(grid_size), 1, hidden) if centralized
+                           else make_body(arch, grid_size, 1, hidden, tf))
         else:
             self.actor = mlp(o, N_ACTIONS, hidden)
             self.critic = mlp(o + state_dim(grid_size) if centralized else o, 1, hidden)
@@ -101,10 +155,21 @@ class Config:
     max_grad_norm: float = 0.5
     reward_scale: float = 0.1
     hidden: int = 256
-    full_map: bool = False
+    arch: str = "mlp"  # mlp | cnn | transformer
+    tf_d_model: int = 64
+    tf_layers: int = 2
+    tf_heads: int = 4
+    tf_patch: int = 4
+    device: str = "cpu"
     seed: int = 0
     out_dir: str = "runs/mappo"
     sampler: ScenarioSampler = field(default_factory=ScenarioSampler)
+
+
+def tf_kwargs(c) -> dict:
+    get = c.get if isinstance(c, dict) else lambda k, d=None: getattr(c, k, d)
+    return dict(d_model=get("tf_d_model", 64), n_layers=get("tf_layers", 2),
+                n_heads=get("tf_heads", 4), patch=get("tf_patch", 4))
 
 
 def critic_input(env: GridSearchEnv, obs: np.ndarray, centralized: bool, state=None) -> np.ndarray:
@@ -118,14 +183,16 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     torch.manual_seed(cfg.seed)
     rng = np.random.default_rng(cfg.seed)
     centralized = cfg.algo == "mappo"
-    envs = [GridSearchEnv(sampler=cfg.sampler, seed=int(rng.integers(1 << 31)), full_map=cfg.full_map)
+    envs = [GridSearchEnv(sampler=cfg.sampler, seed=int(rng.integers(1 << 31)), full_map=cfg.arch != "mlp")
             for _ in range(cfg.n_envs)]
     g = envs[0].grid_size
-    net = ActorCritic(g, centralized, cfg.hidden, cfg.full_map)
+    dev = torch.device(cfg.device)
+    net = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg)).to(dev)
+    T_ = lambda a: torch.from_numpy(a).to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
 
     T, E, A = cfg.rollout_len, cfg.n_envs, MAX_DRONES
-    o_dim = obs_dim() + (map_dim(g) if cfg.full_map else 0)
+    o_dim = obs_dim() + (map_dim(g) if cfg.arch != "mlp" else 0)
     c_dim = obs_dim() + state_dim(g) if centralized else o_dim
     buf = {
         "obs": np.zeros((T, E, A, o_dim), np.float32),
@@ -167,10 +234,11 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
                 state = env.state() if centralized else None
                 c = np.stack([critic_input(env, obs[a], centralized, state) for a in agents])
                 with torch.no_grad():
-                    d = net.dist(torch.from_numpy(o), torch.from_numpy(m))
+                    d = net.dist(T_(o), T_(m))
                     act = d.sample()
-                    logp = d.log_prob(act)
-                    val = net.value(torch.from_numpy(c))
+                    logp = d.log_prob(act).cpu().numpy()
+                    val = net.value(T_(c)).cpu().numpy()
+                    act = act.cpu().numpy()
                 acts = {a: int(x) for a, x in zip(agents, act)}
                 nobs, rew, term, trunc, ninfos = env.step(acts)
                 for j, (a, i) in enumerate(zip(agents, idx)):
@@ -189,7 +257,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
                         nstate = env.state() if centralized else None
                         cin = critic_input(env, nobs[a], centralized, nstate)
                         with torch.no_grad():
-                            buf["boot"][t, ei, i] = float(net.value(torch.from_numpy(cin[None]))[0])
+                            buf["boot"][t, ei, i] = float(net.value(T_(cin[None]))[0])
                 env_steps += 1
                 if not env.agents:
                     ep_metrics.append(env.metrics())
@@ -205,7 +273,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
             for a in env.agents:
                 cin = critic_input(env, obs[a], centralized, state)
                 with torch.no_grad():
-                    last_val[ei, int(a.split("_")[1])] = float(net.value(torch.from_numpy(cin[None]))[0])
+                    last_val[ei, int(a.split("_")[1])] = float(net.value(T_(cin[None]))[0])
 
         adv = np.zeros((T, E, A), np.float32)
         gae = np.zeros((E, A), np.float32)
@@ -221,7 +289,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
         ret = adv + buf["val"]
 
         sel = buf["valid"].reshape(-1) > 0
-        flat = lambda x: torch.from_numpy(x.reshape(-1, *x.shape[3:])[sel])
+        flat = lambda x: T_(np.ascontiguousarray(x.reshape(-1, *x.shape[3:])[sel]))
         b_obs, b_cin, b_mask = flat(buf["obs"]), flat(buf["cin"]), flat(buf["mask"])
         b_act, b_logp = flat(buf["act"]), flat(buf["logp"])
         b_adv, b_ret = flat(adv), flat(ret)
@@ -230,7 +298,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
         n = len(b_obs)
         mb = max(1, n // cfg.minibatches)
         for _ in range(cfg.epochs):
-            perm = torch.randperm(n)
+            perm = torch.randperm(n, device=dev)
             for s in range(0, n, mb):
                 j = perm[s : s + mb]
                 d = net.dist(b_obs[j], b_mask[j])
@@ -267,13 +335,14 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
 def save(net: ActorCritic, cfg: Config, path: Path):
     c = asdict(cfg)
     c["sampler"] = asdict(cfg.sampler)
-    torch.save({"state_dict": net.state_dict(), "config": c}, path)
+    torch.save({"state_dict": {k: v.cpu() for k, v in net.state_dict().items()}, "config": c}, path)
 
 
 def load(path: str | Path) -> tuple[ActorCritic, dict]:
-    ck = torch.load(path, weights_only=False)
+    ck = torch.load(path, weights_only=False, map_location="cpu")
     cfg = ck["config"]
-    net = ActorCritic(cfg["sampler"]["grid_size"], cfg["algo"] == "mappo", cfg["hidden"], cfg.get("full_map", False))
+    arch = cfg.get("arch") or ("cnn" if cfg.get("full_map") else "mlp")
+    net = ActorCritic(cfg["sampler"]["grid_size"], cfg["algo"] == "mappo", cfg["hidden"], arch, tf_kwargs(cfg))
     net.load_state_dict(ck["state_dict"])
     net.eval()
     return net, cfg
