@@ -166,3 +166,38 @@ def test_guide_shaping_rewards_moving_toward_goal():
     env = GridSearchEnv(Scenario(), seed=0, guided=True)
     obs, _ = env.reset(seed=0)
     assert next(iter(obs.values())).shape == (obs_dim() + 3,)
+
+
+def test_shield_prevents_all_collisions():
+    for seed in range(5):
+        env = GridSearchEnv(Scenario(n_drones=8, obstacle_frac=0.2), seed=seed)
+        env.reset(seed=seed)
+        rng = np.random.default_rng(seed)
+        while env.agents:
+            env.step({a: int(rng.integers(9)) for a in env.agents})  # ignores the mask on purpose
+            cells = [tuple(env.pos[a]) for a in env.agents if env.alive[a]]
+            assert len(cells) == len(set(cells))
+        assert env.metrics()["collisions"] == 0
+
+
+def test_shield_blocks_head_on_swap():
+    from swarmsearch.env import MOVES
+
+    env = GridSearchEnv(Scenario(n_drones=2, n_survivors=1), seed=0)
+    env.reset(seed=0)
+    env.pos["drone_0"], env.pos["drone_1"] = np.array([5, 5]), np.array([7, 5])
+    right = int(np.flatnonzero((MOVES == [1, 0]).all(1))[0])
+    left = int(np.flatnonzero((MOVES == [-1, 0]).all(1))[0])
+    env.step({"drone_0": right, "drone_1": left})  # both claim (6, 5): only one gets it
+    assert tuple(env.pos["drone_0"]) != tuple(env.pos["drone_1"])
+    a, b = sorted(env.agents, key=lambda d: env.pos[d][0])
+    env.pos[a], env.pos[b] = np.array([5, 5]), np.array([6, 5])
+    env.step({a: right, b: left})  # head-on swap: both cancelled
+    assert tuple(env.pos[a]) == (5, 5) and tuple(env.pos[b]) == (6, 5)
+
+
+def test_sampler_mostly_no_zones():
+    s = ScenarioSampler()
+    rng = np.random.default_rng(0)
+    frac = np.mean([s.sample(rng).n_zones == 0 for _ in range(2000)])
+    assert 0.55 < frac < 0.65

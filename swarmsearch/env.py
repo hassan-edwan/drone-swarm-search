@@ -69,6 +69,7 @@ class GridSearchEnv(ParallelEnv):
         seed: int | None = None,
         full_map: bool = False,
         guided: bool = False,
+        shield: bool = True,
     ):
         if scenario is None and sampler is None:
             scenario = Scenario()
@@ -80,6 +81,10 @@ class GridSearchEnv(ParallelEnv):
         self.rng = np.random.default_rng(seed)
         self.full_map = full_map
         self.guided = guided
+        # Safety shield: drones never move into a teammate's cell, and
+        # simultaneous claims on one cell (or head-on swaps) are resolved
+        # before anyone moves. Active in training and deployment alike.
+        self.shield = shield
         self.guide_coef = 0.0  # shaping weight, set (and annealed) by the trainer
         self.goals: dict[str, tuple[int, int]] = {}
         self._obs_dim = obs_dim() + (GUIDE_DIM if guided else 0) + (map_dim(grid) if full_map else 0)
@@ -143,6 +148,7 @@ class GridSearchEnv(ParallelEnv):
         self.n_visits = 0
         self.n_repeats = 0
         self.n_collisions = 0
+        self.n_shield = 0
         self._decay = sc.observed_profile().move_prob
         self.goals = {}
 
@@ -196,15 +202,19 @@ class GridSearchEnv(ParallelEnv):
         rewards = {a: -PENALTY_STEP for a in self.agents}
         phi0 = {a: self._potential(a) for a in self.agents} if self.guide_coef else {}
 
-        # Move drones; invalid moves (wall, obstacle) become hover.
-        for a in self.agents:
-            if not self.alive[a]:
-                continue
+        # Move drones; invalid moves (wall, obstacle, occupied cell) become hover.
+        live = [a for a in self.agents if self.alive[a]]
+        target = {}
+        for a in live:
             act = int(actions.get(a, HOVER))
             if not self.action_mask(a)[act]:
                 act = HOVER
-            self.pos[a] = self.pos[a] + MOVES[act]
+            target[a] = self.pos[a] + MOVES[act]
             self.battery[a] = max(0.0, 1.0 - self.t / sc.max_steps)
+        if self.shield:
+            self._resolve_conflicts(live, target)
+        for a in live:
+            self.pos[a] = target[a]
 
         # Potential-based shaping toward the guide's target (Ng et al. 1999):
         # it speeds learning without changing which policy is optimal.
@@ -254,6 +264,36 @@ class GridSearchEnv(ParallelEnv):
         else:
             self.agents = [a for a in self.agents if a not in done_agents]
         return obs, rewards, terminations, truncations, infos
+
+    def _resolve_conflicts(self, live: list[str], target: dict):
+        """Shield: cancel moves (to hover) until no two drones share a cell
+        and no two drones swap cells. A drone already in a cell keeps it;
+        otherwise the lowest-numbered claimant does."""
+        changed = True
+        while changed:
+            changed = False
+            here = {tuple(self.pos[a]): a for a in live}
+            for a in live:  # head-on swaps
+                b = here.get(tuple(target[a]))
+                if b is not None and b != a and tuple(target[b]) == tuple(self.pos[a]):
+                    for d in (a, b):
+                        if tuple(target[d]) != tuple(self.pos[d]):
+                            target[d] = self.pos[d].copy()
+                            self.n_shield += 1
+                            changed = True
+            claims: dict[tuple[int, int], list[str]] = {}
+            for a in live:
+                claims.setdefault(tuple(target[a]), []).append(a)
+            for cell, group in claims.items():
+                if len(group) < 2:
+                    continue
+                stay = [a for a in group if tuple(self.pos[a]) == cell]
+                keep = stay[0] if stay else group[0]
+                for a in group:
+                    if a != keep:
+                        target[a] = self.pos[a].copy()
+                        self.n_shield += 1
+                        changed = True
 
     def set_goals(self, goals: dict[str, tuple[int, int]]):
         """Target cell (x, y) per drone from a guide; drones not listed keep theirs."""
@@ -344,6 +384,11 @@ class GridSearchEnv(ParallelEnv):
         nxt = self.pos[a] + MOVES
         ok = (nxt[:, 0] >= 0) & (nxt[:, 0] < g) & (nxt[:, 1] >= 0) & (nxt[:, 1] < g)
         ok[ok] &= self.free[nxt[ok, 1], nxt[ok, 0]]
+        if self.shield:
+            for b in self.agents:
+                if b != a and self.alive.get(b):
+                    hit = (nxt[:, 0] == self.pos[b][0]) & (nxt[:, 1] == self.pos[b][1])
+                    ok &= ~hit
         ok[HOVER] = True
         return ok.astype(np.int8)
 
@@ -445,5 +490,6 @@ class GridSearchEnv(ParallelEnv):
             "coverage": float(self.visited[self.free].mean()),
             "repeat_frac": self.n_repeats / max(1, self.n_visits),
             "collisions": self.n_collisions,
+            "shield": self.n_shield,
             "steps": self.t,
         }

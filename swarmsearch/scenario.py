@@ -76,7 +76,8 @@ class ScenarioSampler:
     grid_size: int = 20
     drones: tuple[int, int] = (2, 8)
     survivors: tuple[int, int] = (1, 20)
-    zones: tuple[int, int] = (0, 5)
+    zones: tuple[int, int] = (1, 5)  # when there are zones at all
+    p_no_zones: float = 0.6  # most searches have no likely spots
     zone_accuracy: tuple[float, float] = (0.5, 1.0)
     obstacle_frac: tuple[float, float] = (0.0, 0.0)
     detection_prob: tuple[float, float] = (0.6, 1.0)
@@ -95,7 +96,7 @@ class ScenarioSampler:
             n_survivors=int(rng.integers(self.survivors[0], self.survivors[1] + 1)),
             movement=MovementProfile(kind, speed, drift),
             profile_known=bool(rng.random() < self.p_profile_known),
-            n_zones=int(rng.integers(self.zones[0], self.zones[1] + 1)),
+            n_zones=0 if rng.random() < self.p_no_zones else int(rng.integers(self.zones[0], self.zones[1] + 1)),
             zone_accuracy=float(rng.uniform(*self.zone_accuracy)),
             obstacle_frac=float(rng.uniform(*self.obstacle_frac)),
             detection_prob=float(rng.uniform(*self.detection_prob)),

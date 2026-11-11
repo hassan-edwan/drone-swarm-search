@@ -57,17 +57,18 @@ def summarise(rows: list[dict], max_steps: int) -> dict:
         "coverage": float(np.mean([r["coverage"] for r in rows])),
         "repeat_frac": float(np.mean([r["repeat_frac"] for r in rows])),
         "collisions": float(np.mean([r["collisions"] for r in rows])),
+        "shield": float(np.mean([r.get("shield", 0) for r in rows])),
     }
 
 
 def to_markdown(results: dict) -> str:
-    lines = ["| Condition | Method | Time to 90% (steps) | Reached 90% | Found | Coverage | Repeats | Collisions |",
-             "|---|---|---|---|---|---|---|---|"]
+    lines = ["| Condition | Method | Time to 90% (steps) | Reached 90% | Found | Coverage | Repeats | Collisions | Shield stops |",
+             "|---|---|---|---|---|---|---|---|---|"]
     for cname, per in results.items():
         for pname, s in per.items():
             lines.append(
                 f"| {cname} | {pname} | {s['time_to_90']:.0f} ± {s['time_to_90_std']:.0f} | "
                 f"{s['reached_90']:.0%} | {s['found_frac']:.0%} | {s['coverage']:.0%} | "
-                f"{s['repeat_frac']:.0%} | {s['collisions']:.1f} |"
+                f"{s['repeat_frac']:.0%} | {s['collisions']:.1f} | {s.get('shield', 0):.1f} |"
             )
     return "\n".join(lines)
