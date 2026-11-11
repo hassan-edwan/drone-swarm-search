@@ -28,7 +28,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .env import MAP_CHANNELS, MAX_DRONES, N_ACTIONS, GridSearchEnv, map_dim, obs_dim, state_dim
+from .env import GUIDE_DIM, MAP_CHANNELS, MAX_DRONES, N_ACTIONS, GridSearchEnv, map_dim, obs_dim, state_dim
+from .guide import apply_plans, make_guide
 from .scenario import ScenarioSampler
 
 
@@ -41,10 +42,10 @@ def mlp(inp: int, out: int, hidden: int = 256) -> nn.Sequential:
 class MapNet(nn.Module):
     """Vector obs through an MLP branch, full map through a CNN branch."""
 
-    def __init__(self, grid_size: int, out: int, hidden: int = 256):
+    def __init__(self, grid_size: int, out: int, hidden: int = 256, vec: int | None = None):
         super().__init__()
         self.g = grid_size
-        self.vec = obs_dim()
+        self.vec = vec or obs_dim()
         self.cnn = nn.Sequential(
             nn.Conv2d(MAP_CHANNELS, 16, 3, padding=1), nn.ReLU(),
             nn.Conv2d(16, 32, 3, stride=2, padding=1), nn.ReLU(),
@@ -76,11 +77,11 @@ class MapTransformer(nn.Module):
     """
 
     def __init__(self, grid_size: int, out: int, d_model: int = 64, n_layers: int = 2,
-                 n_heads: int = 4, patch: int = 4):
+                 n_heads: int = 4, patch: int = 4, vec: int | None = None):
         super().__init__()
         assert grid_size % patch == 0, "grid size must be a multiple of the patch size"
         self.g, self.p = grid_size, patch
-        self.vec = obs_dim()
+        self.vec = vec or obs_dim()
         n_tok = (grid_size // patch) ** 2
         self.self_embed = nn.Linear(self.vec, d_model)
         self.patch_embed = nn.Linear(MAP_CHANNELS * patch * patch, d_model)
@@ -103,32 +104,31 @@ class MapTransformer(nn.Module):
         return self.head(self.norm(h[:, 0])).reshape(*lead, -1)
 
 
-def make_body(arch: str, grid_size: int, out: int, hidden: int, tf: dict | None = None) -> nn.Module:
+def make_body(arch: str, grid_size: int, out: int, hidden: int, tf: dict | None = None,
+              vec: int | None = None) -> nn.Module:
+    vec = vec or obs_dim()
     if arch == "mlp":
-        return mlp(obs_dim(), out, hidden)
+        return mlp(vec, out, hidden)
     if arch == "cnn":
-        return MapNet(grid_size, out, hidden)
+        return MapNet(grid_size, out, hidden, vec)
     if arch == "transformer":
-        return MapTransformer(grid_size, out, **(tf or {}))
+        return MapTransformer(grid_size, out, vec=vec, **(tf or {}))
     raise ValueError(arch)
 
 
 class ActorCritic(nn.Module):
     def __init__(self, grid_size: int, centralized: bool, hidden: int = 256, arch: str = "mlp",
-                 tf: dict | None = None):
+                 tf: dict | None = None, guided: bool = False):
         super().__init__()
         self.centralized = centralized
         self.arch = arch
         self.full_map = arch != "mlp"
-        o = obs_dim()
-        if self.full_map:
-            self.actor = make_body(arch, grid_size, N_ACTIONS, hidden, tf)
-            # MAPPO's critic already gets the full global state; IPPO's reads the map with its own body.
-            self.critic = (mlp(o + state_dim(grid_size), 1, hidden) if centralized
-                           else make_body(arch, grid_size, 1, hidden, tf))
-        else:
-            self.actor = mlp(o, N_ACTIONS, hidden)
-            self.critic = mlp(o + state_dim(grid_size) if centralized else o, 1, hidden)
+        self.guided = guided
+        o = self.vec = obs_dim() + (GUIDE_DIM if guided else 0)
+        self.actor = make_body(arch, grid_size, N_ACTIONS, hidden, tf, o)
+        # MAPPO's critic gets the full global state plus the vector obs; IPPO's sees only the local obs.
+        self.critic = (mlp(o + state_dim(grid_size), 1, hidden) if centralized
+                       else make_body(arch, grid_size, 1, hidden, tf, o))
 
     def dist(self, obs: torch.Tensor, mask: torch.Tensor) -> torch.distributions.Categorical:
         logits = self.actor(obs).masked_fill(mask == 0, -1e9)
@@ -161,6 +161,11 @@ class Config:
     tf_heads: int = 4
     tf_patch: int = 4
     device: str = "cpu"
+    guide: str = "none"  # none | heuristic | llm:<hugging face model id>
+    guide_every: int = 25  # env steps between guide queries
+    guide_coef: float = 1.0  # initial shaping weight
+    guide_anneal: float = 0.6  # fraction of training over which the weight fades to 0
+    guide_device: str = "cpu"
     seed: int = 0
     out_dir: str = "runs/mappo"
     sampler: ScenarioSampler = field(default_factory=ScenarioSampler)
@@ -172,28 +177,32 @@ def tf_kwargs(c) -> dict:
                 n_heads=get("tf_heads", 4), patch=get("tf_patch", 4))
 
 
-def critic_input(env: GridSearchEnv, obs: np.ndarray, centralized: bool, state=None) -> np.ndarray:
+def critic_input(env: GridSearchEnv, obs: np.ndarray, centralized: bool, state=None, vec: int | None = None) -> np.ndarray:
     if not centralized:
         return obs
     # The centralized critic takes the global state plus the vector part of the obs.
-    return np.concatenate([env.state() if state is None else state, obs[: obs_dim()]])
+    return np.concatenate([env.state() if state is None else state, obs[: vec or obs_dim()]])
 
 
 def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     torch.manual_seed(cfg.seed)
     rng = np.random.default_rng(cfg.seed)
     centralized = cfg.algo == "mappo"
-    envs = [GridSearchEnv(sampler=cfg.sampler, seed=int(rng.integers(1 << 31)), full_map=cfg.arch != "mlp")
+    guide = make_guide(cfg.guide, cfg.guide_device)
+    guided = guide is not None
+    envs = [GridSearchEnv(sampler=cfg.sampler, seed=int(rng.integers(1 << 31)), full_map=cfg.arch != "mlp",
+                         guided=guided)
             for _ in range(cfg.n_envs)]
     g = envs[0].grid_size
     dev = torch.device(cfg.device)
-    net = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg)).to(dev)
+    net = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided).to(dev)
+    vec = net.vec
     T_ = lambda a: torch.from_numpy(a).to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
 
     T, E, A = cfg.rollout_len, cfg.n_envs, MAX_DRONES
-    o_dim = obs_dim() + (map_dim(g) if cfg.arch != "mlp" else 0)
-    c_dim = obs_dim() + state_dim(g) if centralized else o_dim
+    o_dim = vec + (map_dim(g) if cfg.arch != "mlp" else 0)
+    c_dim = vec + state_dim(g) if centralized else o_dim
     buf = {
         "obs": np.zeros((T, E, A, o_dim), np.float32),
         "cin": np.zeros((T, E, A, c_dim), np.float32),
@@ -217,14 +226,32 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     log_f = open(out / "train_log.csv", "w", newline="")
     log = csv.writer(log_f)
     log.writerow(["update", "env_steps", "episodes", "found_frac", "time_to_90", "coverage",
-                  "repeat_frac", "collisions", "policy_loss", "value_loss", "entropy", "secs"])
+                  "repeat_frac", "collisions", "policy_loss", "value_loss", "entropy", "secs",
+                  "guide_coef", "guide_parse_rate"])
 
     n_updates = cfg.total_env_steps // (T * E)
     env_steps, t0, ep_metrics = 0, time.time(), []
+    def replan():
+        """Query the guide for every env due a new plan; refresh their obs."""
+        due = [ei for ei, e in enumerate(envs) if e.agents and e.t % cfg.guide_every == 0]
+        if not due:
+            return
+        apply_plans([envs[ei] for ei in due], guide.plan([envs[ei] for ei in due]))
+        for ei in due:
+            e, (_, infos) = envs[ei], cur[ei]
+            cur[ei] = ({a: e._obs(a) for a in e.agents}, infos)
+
     for update in range(1, n_updates + 1):
         for k in buf:
             buf[k].fill(0)
+        if guided:
+            frac = (update - 1) / max(1, int(cfg.guide_anneal * n_updates))
+            coef = cfg.guide_coef * max(0.0, 1.0 - frac)
+            for e in envs:
+                e.guide_coef = coef
         for t in range(T):
+            if guided:
+                replan()
             for ei, env in enumerate(envs):
                 obs, infos = cur[ei]
                 agents = list(env.agents)
@@ -232,7 +259,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
                 o = np.stack([obs[a] for a in agents])
                 m = np.stack([infos[a]["action_mask"] for a in agents]).astype(np.float32)
                 state = env.state() if centralized else None
-                c = np.stack([critic_input(env, obs[a], centralized, state) for a in agents])
+                c = np.stack([critic_input(env, obs[a], centralized, state, vec) for a in agents])
                 with torch.no_grad():
                     d = net.dist(T_(o), T_(m))
                     act = d.sample()
@@ -255,7 +282,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
                     elif trunc[a]:
                         buf["term"][t, ei, i] = 1.0
                         nstate = env.state() if centralized else None
-                        cin = critic_input(env, nobs[a], centralized, nstate)
+                        cin = critic_input(env, nobs[a], centralized, nstate, vec)
                         with torch.no_grad():
                             buf["boot"][t, ei, i] = float(net.value(T_(cin[None]))[0])
                 env_steps += 1
@@ -271,7 +298,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
             obs, _ = cur[ei]
             state = env.state() if centralized else None
             for a in env.agents:
-                cin = critic_input(env, obs[a], centralized, state)
+                cin = critic_input(env, obs[a], centralized, state, vec)
                 with torch.no_grad():
                     last_val[ei, int(a.split("_")[1])] = float(net.value(T_(cin[None]))[0])
 
@@ -319,12 +346,15 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
                 return float(np.mean(vals))
             row = [update, env_steps, len(ep_metrics), avg("found_frac"),
                    avg("time_to_90", cfg.sampler.max_steps), avg("coverage"), avg("repeat_frac"),
-                   avg("collisions"), float(pl), float(vl), float(ent), round(time.time() - t0)]
+                   avg("collisions"), float(pl), float(vl), float(ent), round(time.time() - t0),
+                   envs[0].guide_coef, getattr(guide, "parse_rate", "")]
             log.writerow(row)
             log_f.flush()
             print(f"[{cfg.algo}] upd {update}/{n_updates} steps {env_steps} eps {len(ep_metrics)} "
                   f"found {row[3]:.2f} t90 {row[4]:.0f} cov {row[5]:.2f} rep {row[6]:.2f} "
-                  f"coll {row[7]:.2f} ent {row[10]:.2f} {row[11]}s", flush=True)
+                  f"coll {row[7]:.2f} ent {row[10]:.2f} {row[11]}s"
+                  + (f" guide {row[12]:.2f}" if guided else "")
+                  + (f" parsed {row[13]:.0%}" if row[13] != "" else ""), flush=True)
             ep_metrics = []
         if update % 50 == 0 or update == n_updates:
             save(net, cfg, out / "model.pt")
@@ -342,7 +372,8 @@ def load(path: str | Path) -> tuple[ActorCritic, dict]:
     ck = torch.load(path, weights_only=False, map_location="cpu")
     cfg = ck["config"]
     arch = cfg.get("arch") or ("cnn" if cfg.get("full_map") else "mlp")
-    net = ActorCritic(cfg["sampler"]["grid_size"], cfg["algo"] == "mappo", cfg["hidden"], arch, tf_kwargs(cfg))
+    guided = cfg.get("guide", "none") not in (None, "none")
+    net = ActorCritic(cfg["sampler"]["grid_size"], cfg["algo"] == "mappo", cfg["hidden"], arch, tf_kwargs(cfg), guided)
     net.load_state_dict(ck["state_dict"])
     net.eval()
     return net, cfg
@@ -351,9 +382,14 @@ def load(path: str | Path) -> tuple[ActorCritic, dict]:
 class LearnedPolicy:
     """Wraps a trained actor with the same reset/act interface as the baselines."""
 
-    def __init__(self, net: ActorCritic, greedy: bool = False, seed: int = 0):
+    def __init__(self, net: ActorCritic, greedy: bool = False, seed: int = 0, guide=None,
+                 guide_every: int = 25):
         self.net = net
         self.greedy = greedy
+        self.guide = guide
+        self.guide_every = guide_every
+        if net.guided and guide is None:
+            raise ValueError("this policy was trained with a guide; pass one (see make_guide)")
         torch.manual_seed(seed)
 
     def reset(self, env):
@@ -363,7 +399,10 @@ class LearnedPolicy:
         agents = list(env.agents)
         if not agents:
             return {}
-        o = torch.from_numpy(np.stack([env._obs(a, full_map=self.net.full_map) for a in agents]))
+        if self.guide is not None and env.t % self.guide_every == 0:
+            apply_plans([env], self.guide.plan([env]))
+        o = torch.from_numpy(np.stack([env._obs(a, full_map=self.net.full_map, guided=self.net.guided)
+                                       for a in agents]))
         m = torch.from_numpy(np.stack([env.action_mask(a) for a in agents]).astype(np.float32))
         with torch.no_grad():
             d = self.net.dist(o, m)

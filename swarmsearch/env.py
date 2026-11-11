@@ -40,6 +40,9 @@ COARSE = 5
 N_TEAMMATES = 2
 # Full shared-map view (optional): freshness, belief, obstacles, self, teammates.
 MAP_CHANNELS = 5
+# Guidance input (optional): direction to the guide's target cell + "has target".
+GUIDE_DIM = 3
+GUIDE_GAMMA = 0.99  # discount used in the potential-based shaping bonus
 
 
 def obs_dim(patch_radius: int = PATCH_RADIUS, coarse: int = COARSE) -> int:
@@ -65,6 +68,7 @@ class GridSearchEnv(ParallelEnv):
         max_drones: int = MAX_DRONES,
         seed: int | None = None,
         full_map: bool = False,
+        guided: bool = False,
     ):
         if scenario is None and sampler is None:
             scenario = Scenario()
@@ -75,7 +79,10 @@ class GridSearchEnv(ParallelEnv):
         self.possible_agents = [f"drone_{i}" for i in range(max_drones)]
         self.rng = np.random.default_rng(seed)
         self.full_map = full_map
-        self._obs_dim = obs_dim() + (map_dim(grid) if full_map else 0)
+        self.guided = guided
+        self.guide_coef = 0.0  # shaping weight, set (and annealed) by the trainer
+        self.goals: dict[str, tuple[int, int]] = {}
+        self._obs_dim = obs_dim() + (GUIDE_DIM if guided else 0) + (map_dim(grid) if full_map else 0)
         self._state_dim = state_dim(grid)
         self.agents: list[str] = []
 
@@ -137,6 +144,7 @@ class GridSearchEnv(ParallelEnv):
         self.n_repeats = 0
         self.n_collisions = 0
         self._decay = sc.observed_profile().move_prob
+        self.goals = {}
 
         for a in self.agents:
             self._search(a)
@@ -186,6 +194,7 @@ class GridSearchEnv(ParallelEnv):
         g = sc.grid_size
         self.t += 1
         rewards = {a: -PENALTY_STEP for a in self.agents}
+        phi0 = {a: self._potential(a) for a in self.agents} if self.guide_coef else {}
 
         # Move drones; invalid moves (wall, obstacle) become hover.
         for a in self.agents:
@@ -196,6 +205,12 @@ class GridSearchEnv(ParallelEnv):
                 act = HOVER
             self.pos[a] = self.pos[a] + MOVES[act]
             self.battery[a] = max(0.0, 1.0 - self.t / sc.max_steps)
+
+        # Potential-based shaping toward the guide's target (Ng et al. 1999):
+        # it speeds learning without changing which policy is optimal.
+        for a, p0 in phi0.items():
+            if self.alive[a]:
+                rewards[a] += self.guide_coef * (GUIDE_GAMMA * self._potential(a) - p0)
 
         # Drone-drone collisions: two live drones in one cell.
         cells: dict[tuple[int, int], list[str]] = {}
@@ -239,6 +254,17 @@ class GridSearchEnv(ParallelEnv):
         else:
             self.agents = [a for a in self.agents if a not in done_agents]
         return obs, rewards, terminations, truncations, infos
+
+    def set_goals(self, goals: dict[str, tuple[int, int]]):
+        """Target cell (x, y) per drone from a guide; drones not listed keep theirs."""
+        self.goals.update(goals)
+
+    def _potential(self, a) -> float:
+        if a not in self.goals:
+            return 0.0
+        gx, gy = self.goals[a]
+        x, y = self.pos[a]
+        return -max(abs(gx - x), abs(gy - y)) / self.grid_size
 
     def freshness(self) -> np.ndarray:
         """1 = just searched, decaying toward 0 as survivors could have moved in."""
@@ -337,7 +363,7 @@ class GridSearchEnv(ParallelEnv):
         # Scale so that a uniform prior reads 1.0 per free cell.
         return np.clip(self.belief * self.n_free, 0.0, 5.0)
 
-    def _obs(self, a, full_map: bool | None = None) -> np.ndarray:
+    def _obs(self, a, full_map: bool | None = None, guided: bool | None = None) -> np.ndarray:
         """Local observation. With full_map, the whole shared team map is
         appended as MAP_CHANNELS flattened g x g channels."""
         sc = self.scenario
@@ -368,6 +394,12 @@ class GridSearchEnv(ParallelEnv):
             mate_feats[3 * i : 3 * i + 3] = (d[0] / g, d[1] / g, 1.0)
         parts.append(mate_feats)
         parts.append(sc.observed_profile().as_vector(sc.profile_known))
+        if self.guided if guided is None else guided:
+            if a in self.goals:
+                gx, gy = self.goals[a]
+                parts.append(np.array([(gx - x) / g, (gy - y) / g, 1.0]))
+            else:
+                parts.append(np.zeros(GUIDE_DIM))
         if self.full_map if full_map is None else full_map:
             me = np.zeros((g, g))
             me[y, x] = 1.0

@@ -138,3 +138,34 @@ def test_transformer_patch_tokens_keep_cell_positions():
     net(x)
     changed = (captured["in"] != toks0).any(-1)[0].nonzero().flatten().tolist()
     assert changed == [8]
+
+
+def test_guide_parse_and_heuristic():
+    from swarmsearch.guide import HeuristicGuide, describe, parse
+
+    env = GridSearchEnv(Scenario(n_drones=4), seed=0)
+    env.reset(seed=0)
+    text = 'Sure! {"d0": [1, 2], "d1": [4,4], "d2": [9, 9], "d7": [0, 0]}'
+    assert parse(text, env) == {"drone_0": (1, 2), "drone_1": (4, 4)}  # out of range / dead dropped
+    plan = HeuristicGuide().plan_one(env)
+    assert set(plan) == set(env.agents) and len(set(plan.values())) == len(plan)
+    assert "d3" in describe(env)
+
+
+def test_guide_shaping_rewards_moving_toward_goal():
+    from swarmsearch.env import MOVES
+
+    def reward_for(move):
+        env = GridSearchEnv(Scenario(n_drones=2, n_survivors=1), seed=0, guided=True)
+        env.reset(seed=0)
+        x, y = env.pos["drone_0"]
+        env.set_goals({"drone_0": (19, int(y)), "drone_1": tuple(env.pos["drone_1"])})
+        env.guide_coef = 1.0
+        _, r, *_ = env.step({"drone_0": move, "drone_1": HOVER})
+        return r["drone_0"]
+
+    right = int(np.flatnonzero((MOVES == [1, 0]).all(1))[0])
+    assert reward_for(right) > reward_for(HOVER)
+    env = GridSearchEnv(Scenario(), seed=0, guided=True)
+    obs, _ = env.reset(seed=0)
+    assert next(iter(obs.values())).shape == (obs_dim() + 3,)
