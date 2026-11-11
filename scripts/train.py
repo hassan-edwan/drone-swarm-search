@@ -29,12 +29,10 @@ def main():
     p.add_argument("--tf-layers", type=int, default=2)
     p.add_argument("--tf-dim", type=int, default=64)
     p.add_argument("--device", default="cpu", help="cpu or cuda")
-    p.add_argument("--guide", default="none",
-                   help="none | heuristic | llm:<hugging face model id>, e.g. llm:Qwen/Qwen2.5-7B-Instruct")
+    p.add_argument("--guide", default="none", choices=["none", "heuristic"])
     p.add_argument("--guide-every", type=int, default=25, help="env steps between guide queries")
     p.add_argument("--guide-anneal", type=float, default=0.6,
                    help="fraction of training over which the guide's shaping bonus fades to 0")
-    p.add_argument("--guide-device", default=None, help="device for the LLM (defaults to --device)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--out", default=None)
@@ -52,7 +50,6 @@ def main():
         guide=a.guide,
         guide_every=a.guide_every,
         guide_anneal=a.guide_anneal,
-        guide_device=a.guide_device or a.device,
         seed=a.seed,
         out_dir=a.out or f"runs/{a.algo}",
         sampler=ScenarioSampler(grid_size=a.grid, obstacle_frac=(0.0, a.obstacles)),

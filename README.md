@@ -84,35 +84,21 @@ python scripts/render_episode.py --model runs/mappo/model.pt --condition drift_k
 
 All three use the same PPO trainer and the MAPPO/IPPO critics, so results are directly comparable.
 
-## LLM guidance (`--guide`)
+## Guidance (`--guide heuristic`)
 
-A pretrained language model downloaded from Hugging Face acts as a high-level
-planner. Every 25 steps it reads a text summary of the search (5×5 regions with
-expected unfound survivors and how recently each was searched, the movement
-profile, drone positions, time left) and answers with a target region per
-drone as JSON. The policy gets the direction to its target as input, and
-during training a potential-based shaping bonus for moving toward it
-(Ng et al. 1999) that fades to zero (`--guide-anneal`), so the final policy
-optimizes the true reward and can override bad advice. This follows
-LLM-guided exploration in RL (e.g. ELLM, Du et al. 2023).
-
-```bash
-pip install -r requirements-llm.txt
-python scripts/train.py --algo mappo --guide llm:Qwen/Qwen2.5-7B-Instruct --guide-device cuda --envs 32
-python scripts/train.py --algo mappo --guide heuristic     # rule-based guide: fast, for development
-```
-
-Unparseable LLM answers fall back to the rule-based guide; the training log
-records the parse rate. On a CPU the LLM is far too slow (a 1.5B model takes
-~70 s per batch of 8 prompts), so guided training needs a GPU.
+A rule-based planner gives each drone a target region every 25 steps (best
+expected unfound survivors × staleness, minus distance, one drone per
+region). The policy gets the direction to its target as input, and during
+training a potential-based shaping bonus for moving toward it (Ng et al.
+1999) that fades to zero (`--guide-anneal`), so the final policy optimizes
+the true reward and can override the guide.
 
 ## Running on an HPC cluster (Slurm, e.g. Zaratan)
 
-See the header of `scripts/hpc/train_guided.sbatch` for one-time setup
-(venv, model download to scratch), then:
+See the header of `scripts/hpc/train.sbatch` for one-time setup, then:
 
 ```bash
-sbatch scripts/hpc/train_guided.sbatch     # set --account first
+ARGS="--guide heuristic" TAG=guided sbatch scripts/hpc/train.sbatch   # set --account first
 ```
 
 ## The environment

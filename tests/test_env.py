@@ -140,16 +140,13 @@ def test_transformer_patch_tokens_keep_cell_positions():
     assert changed == [8]
 
 
-def test_guide_parse_and_heuristic():
-    from swarmsearch.guide import HeuristicGuide, describe, parse
+def test_heuristic_guide_assigns_distinct_regions():
+    from swarmsearch.guide import HeuristicGuide
 
     env = GridSearchEnv(Scenario(n_drones=4), seed=0)
     env.reset(seed=0)
-    text = 'Sure! {"d0": [1, 2], "d1": [4,4], "d2": [9, 9], "d7": [0, 0]}'
-    assert parse(text, env) == {"drone_0": (1, 2), "drone_1": (4, 4)}  # out of range / dead dropped
     plan = HeuristicGuide().plan_one(env)
     assert set(plan) == set(env.agents) and len(set(plan.values())) == len(plan)
-    assert "d3" in describe(env)
 
 
 def test_guide_shaping_rewards_moving_toward_goal():

@@ -161,11 +161,10 @@ class Config:
     tf_heads: int = 4
     tf_patch: int = 4
     device: str = "cpu"
-    guide: str = "none"  # none | heuristic | llm:<hugging face model id>
+    guide: str = "none"  # none | heuristic
     guide_every: int = 25  # env steps between guide queries
     guide_coef: float = 1.0  # initial shaping weight
     guide_anneal: float = 0.6  # fraction of training over which the weight fades to 0
-    guide_device: str = "cpu"
     seed: int = 0
     out_dir: str = "runs/mappo"
     sampler: ScenarioSampler = field(default_factory=ScenarioSampler)
@@ -188,7 +187,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     torch.manual_seed(cfg.seed)
     rng = np.random.default_rng(cfg.seed)
     centralized = cfg.algo == "mappo"
-    guide = make_guide(cfg.guide, cfg.guide_device)
+    guide = make_guide(cfg.guide)
     guided = guide is not None
     envs = [GridSearchEnv(sampler=cfg.sampler, seed=int(rng.integers(1 << 31)), full_map=cfg.arch != "mlp",
                          guided=guided)
@@ -227,7 +226,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     log = csv.writer(log_f)
     log.writerow(["update", "env_steps", "episodes", "found_frac", "time_to_90", "coverage",
                   "repeat_frac", "collisions", "policy_loss", "value_loss", "entropy", "secs",
-                  "guide_coef", "guide_parse_rate"])
+                  "guide_coef"])
 
     n_updates = cfg.total_env_steps // (T * E)
     env_steps, t0, ep_metrics = 0, time.time(), []
@@ -347,14 +346,13 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
             row = [update, env_steps, len(ep_metrics), avg("found_frac"),
                    avg("time_to_90", cfg.sampler.max_steps), avg("coverage"), avg("repeat_frac"),
                    avg("collisions"), float(pl), float(vl), float(ent), round(time.time() - t0),
-                   envs[0].guide_coef, getattr(guide, "parse_rate", "")]
+                   envs[0].guide_coef]
             log.writerow(row)
             log_f.flush()
             print(f"[{cfg.algo}] upd {update}/{n_updates} steps {env_steps} eps {len(ep_metrics)} "
                   f"found {row[3]:.2f} t90 {row[4]:.0f} cov {row[5]:.2f} rep {row[6]:.2f} "
                   f"coll {row[7]:.2f} ent {row[10]:.2f} {row[11]}s"
-                  + (f" guide {row[12]:.2f}" if guided else "")
-                  + (f" parsed {row[13]:.0%}" if row[13] != "" else ""), flush=True)
+                  + (f" guide {row[12]:.2f}" if guided else ""), flush=True)
             ep_metrics = []
         if update % 50 == 0 or update == n_updates:
             save(net, cfg, out / "model.pt")

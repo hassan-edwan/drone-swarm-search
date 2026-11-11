@@ -23,7 +23,6 @@ def main():
     p.add_argument("--conditions", nargs="*", default=list(CONDITIONS))
     p.add_argument("--out", default="results")
     p.add_argument("--guide", default=None, help="override the guide a model was trained with")
-    p.add_argument("--guide-device", default="cpu")
     a = p.parse_args()
 
     policies = {"lawnmower": Lawnmower(), "random": RandomWalk(seed=0)}
@@ -32,7 +31,7 @@ def main():
         arch = cfg.get("arch") or ("cnn" if cfg.get("full_map") else "mlp")
         name = cfg["algo"] + ("" if arch == "mlp" else f"_{arch}")
         spec = a.guide or cfg.get("guide", "none")
-        guide = make_guide(spec, a.guide_device) if net.guided else None
+        guide = make_guide(spec) if net.guided else None
         if guide is not None:
             name += "_guided"
         policies[name] = LearnedPolicy(net, guide=guide, guide_every=cfg.get("guide_every", 25))
