@@ -31,7 +31,8 @@ DIRECTED = 0.8  # drift / to_safety: share of moves along the main direction
 
 HYP_SPEEDS = (0.5, 1.0, 1.5)
 HYP_DRIFT_DIRS = ((1, 0), (-1, 0), (0, 1), (0, -1))
-HYP_TARGET_STEPS = 4  # safe-point hypotheses on a 4x4 lattice
+HYP_SAFETY_SPEEDS = (1.0,)  # where the safe point is matters far more than speed
+HYP_TARGET_STEPS = 10  # safe-point hypotheses on a 10x10 lattice (every 2 cells)
 HYP_DIRECTED = DIRECTED  # hypotheses' directedness (lower = tolerant of a wrong direction or target)
 
 
@@ -95,7 +96,7 @@ def hypothesis_bank(grid_size: int) -> tuple[list[MovementProfile], np.ndarray]:
     ]
     targets = sorted({int(round(v)) for v in np.linspace(1, grid_size - 2, HYP_TARGET_STEPS)})
     groups.append([MovementProfile("to_safety", v, target=(tx, ty))
-                   for ty in targets for tx in targets for v in HYP_SPEEDS])
+                   for ty in targets for tx in targets for v in HYP_SAFETY_SPEEDS])
     profiles, prior = [], []
     for grp in groups:
         profiles += grp
