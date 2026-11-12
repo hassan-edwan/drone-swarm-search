@@ -36,9 +36,13 @@ HYP_TARGET_STEPS = 10  # safe-point hypotheses on a 10x10 lattice (every 2 cells
 HYP_DIRECTED = DIRECTED  # hypotheses' directedness (lower = tolerant of a wrong direction or target)
 
 
-def move_weights(prof: MovementProfile, free: np.ndarray, directed: float = DIRECTED) -> np.ndarray:
+def move_weights(prof: MovementProfile, free: np.ndarray, directed: float = DIRECTED,
+                 dist: np.ndarray | None = None) -> np.ndarray:
     """(9, g, g): probability that a survivor in each cell takes each move.
-    Moves into walls or obstacles become staying put."""
+    Moves into walls or obstacles become staying put. For to_safety, `dist`
+    is the shortest-path distance to the safe point (needed with obstacles):
+    the main move is then a step along a shortest path, preferring the
+    straight-line direction when it is one (always, on an open map)."""
     g = free.shape[0]
     W = np.zeros((9, g, g))
     p = prof.move_prob
@@ -55,8 +59,19 @@ def move_weights(prof: MovementProfile, free: np.ndarray, directed: float = DIRE
     elif prof.kind == "to_safety":
         tx, ty = prof.target
         sx, sy = np.sign(tx - xx), np.sign(ty - yy)
-        for m, (dx, dy) in enumerate(MOVES[:8]):
-            W[m] += p * directed * ((sx == dx) & (sy == dy))
+        straight = np.stack([(sx == dx) & (sy == dy) for dx, dy in MOVES[:8]])
+        if dist is None:
+            main = straight
+        else:
+            P = np.pad(dist, 1, constant_values=np.inf)
+            nd = np.stack([P[1 + dy:1 + dy + g, 1 + dx:1 + dx + g] for dx, dy in MOVES[:8]])
+            best = nd.min(axis=0)
+            on_path = (nd == best) & (best < dist)
+            pick = np.where(on_path.any(0) & (straight & on_path).any(0),
+                            np.argmax(straight & on_path, axis=0), np.argmax(on_path, axis=0))
+            main = (np.arange(8)[:, None, None] == pick) & on_path.any(0)
+        W[:8] += p * directed * main
+        W[STAY] += p * directed * ~main.any(0)  # no way forward: stays
         at = (xx == tx) & (yy == ty)
         W[:, at] = 0.0
         W[STAY, at] = 1.0  # arrived: stays at the safe point
@@ -87,8 +102,9 @@ def propagate(B: np.ndarray, W: np.ndarray) -> np.ndarray:
     return out
 
 
-def hypothesis_bank(grid_size: int) -> tuple[list[MovementProfile], np.ndarray]:
-    """Candidate movement profiles and their prior (each movement type equally likely)."""
+def hypothesis_bank(grid_size: int, free: np.ndarray | None = None) -> tuple[list[MovementProfile], np.ndarray]:
+    """Candidate movement profiles and their prior (each movement type equally
+    likely). Safe points inside obstacles are left out."""
     groups = [
         [MovementProfile("still", 0.0)],
         [MovementProfile("wander", v) for v in HYP_SPEEDS],
@@ -96,7 +112,8 @@ def hypothesis_bank(grid_size: int) -> tuple[list[MovementProfile], np.ndarray]:
     ]
     targets = sorted({int(round(v)) for v in np.linspace(1, grid_size - 2, HYP_TARGET_STEPS)})
     groups.append([MovementProfile("to_safety", v, target=(tx, ty))
-                   for ty in targets for tx in targets for v in HYP_SAFETY_SPEEDS])
+                   for ty in targets for tx in targets for v in HYP_SAFETY_SPEEDS
+                   if free is None or free[ty, tx]])
     profiles, prior = [], []
     for grp in groups:
         profiles += grp

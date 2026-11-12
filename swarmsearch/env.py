@@ -28,6 +28,7 @@ from pettingzoo import ParallelEnv
 
 from . import belief as _belief
 from .belief import DIRECTED, move_weights, propagate
+from .obstacles import distance_fields, make_obstacles
 from .scenario import PROFILE_DIM, Scenario, ScenarioSampler
 
 # Action 8 is hover; 0-7 are the 8 neighbours.
@@ -131,15 +132,10 @@ class GridSearchEnv(ParallelEnv):
 
         self.obstacles = np.zeros((g, g), dtype=bool)
         if sc.obstacle_frac > 0:
-            n_obs = int(sc.obstacle_frac * g * g)
-            free = np.ones(g * g, dtype=bool)
-            for x, y in self.starts:
-                free[y * g + x] = False
+            keep = list(self.starts)
             if sc.movement.kind == "to_safety":
-                tx, ty = sc.movement.target
-                free[ty * g + tx] = False
-            idx = rng.choice(np.flatnonzero(free), size=n_obs, replace=False)
-            self.obstacles.flat[idx] = True
+                keep.append(tuple(sc.movement.target))
+            self.obstacles = make_obstacles(rng, g, sc.obstacle_frac, keep, sc.obstacle_layout)
         self.free = ~self.obstacles
         self.n_free = int(self.free.sum())
 
@@ -167,7 +163,7 @@ class GridSearchEnv(ParallelEnv):
         self.n_collisions = 0
         self.n_shield = 0
         # Survivors move with the true model; the belief with the hypotheses.
-        self._W_true_cum = np.cumsum(move_weights(sc.movement, self.free), axis=0)
+        self._W_true_cum = np.cumsum(self._move_weights([sc.movement], DIRECTED)[0], axis=0)
         self.goals = {}
 
         for a in self.agents:
@@ -363,12 +359,12 @@ class GridSearchEnv(ParallelEnv):
         if sc.profile_known:
             profiles, prior = [sc.movement], np.ones(1)
         else:
-            profiles, prior = _belief.hypothesis_bank(self.grid_size)
+            profiles, prior = _belief.hypothesis_bank(self.grid_size, self.free)
         key = (tuple(profiles), sc.profile_known, _belief.HYP_DIRECTED) if not self.obstacles.any() else None
         W = _W_CACHE.get(key) if key else None
         if W is None:
             directed = DIRECTED if sc.profile_known else _belief.HYP_DIRECTED
-            W = np.stack([move_weights(pr, self.free, directed) for pr in profiles])
+            W = self._move_weights(profiles, directed)
             if key:
                 _W_CACHE[key] = W
         self._W = W
@@ -378,6 +374,17 @@ class GridSearchEnv(ParallelEnv):
         self._V = np.stack([pr.as_vector(False, self.grid_size) for pr in profiles])
         self._V_moveprob = np.array([pr.move_prob for pr in profiles])
         self._mix()
+
+    def _move_weights(self, profiles, directed) -> np.ndarray:
+        """(K, 9, g, g) move probabilities; with obstacles, survivors heading
+        to safety follow shortest paths around them."""
+        dists = {}
+        if self.obstacles.any():
+            targets = sorted({pr.target for pr in profiles if pr.kind == "to_safety"})
+            if targets:
+                dists = dict(zip(targets, distance_fields(self.free, targets)))
+        return np.stack([move_weights(pr, self.free, directed, dists.get(pr.target) if pr.kind == "to_safety" else None)
+                         for pr in profiles])
 
     def _mix(self):
         """Shared belief = hypothesis maps weighted by the find-based weights."""

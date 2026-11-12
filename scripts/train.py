@@ -2,6 +2,7 @@
 
     python scripts/train.py --algo mappo --steps 2000000 --out runs/mappo
     python scripts/train.py --algo ippo  --steps 2000000 --out runs/ippo
+    python scripts/train.py --obstacles 0.3 --init models/m1.pt --out runs/mappo_m2   # M2
 """
 
 import argparse
@@ -33,6 +34,7 @@ def main():
     p.add_argument("--guide-every", type=int, default=25, help="env steps between guide queries")
     p.add_argument("--guide-anneal", type=float, default=0.6,
                    help="fraction of training over which the guide's shaping bonus fades to 0")
+    p.add_argument("--init", default=None, help="start from this model.pt (e.g. fine-tune M1 -> M2)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--out", default=None)
@@ -51,6 +53,7 @@ def main():
         guide_every=a.guide_every,
         guide_anneal=a.guide_anneal,
         seed=a.seed,
+        init_from=a.init,
         out_dir=a.out or f"runs/{a.algo}",
         sampler=ScenarioSampler(grid_size=a.grid, obstacle_frac=(0.0, a.obstacles)),
     )

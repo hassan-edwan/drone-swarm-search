@@ -12,7 +12,7 @@ fixed lawnmower sweep.
 | Step | Milestone | Status |
 |---|---|---|
 | M1 | 2D grid search env, lawnmower and random baselines, MAPPO and IPPO | **In progress** (env, baselines, trainer, evaluation done; training runs next) |
-| M2 | 2D grid with obstacles | Env supports it (`--obstacles 0.3`); not trained yet |
+| M2 | 2D grid with obstacles | Set up: block layouts, path-following survivors, `--m2` test conditions; not trained yet |
 | M3 | 3D in gym-pybullet-drones, policy waypoints flown by PID | Planned |
 | M4 | 3D with obstacles | Stretch |
 | M5 | 3D camera with visual blockers | Stretch |
@@ -64,8 +64,9 @@ python scripts/train.py --algo ippo  --steps 2000000 --out runs/ippo
 # Actor architecture: local vector only (default), + full map via CNN, or via transformer
 python scripts/train.py --algo mappo --arch transformer --steps 2000000 --out runs/mappo_tf
 
-# M2: same, with up to 30% of cells blocked
-python scripts/train.py --algo mappo --obstacles 0.3 --out runs/mappo_m2
+# M2: up to 30% of cells blocked, fine-tuned from the M1 model; evaluate on the obstacle conditions
+python scripts/train.py --algo mappo --obstacles 0.3 --init models/m1.pt --out runs/mappo_m2
+python scripts/evaluate.py --models runs/mappo_m2/model.pt --m2 --episodes 100
 
 # Compare everything on the same held-out scenarios
 python scripts/evaluate.py --models runs/mappo/model.pt runs/ippo/model.pt --episodes 50
@@ -105,6 +106,7 @@ ARGS="--guide heuristic" TAG=guided sbatch scripts/hpc/train.sbatch   # set --ac
 
 - **Grid:** 20 × 20 cells of 10 m (a 200 m × 200 m zone); one step ≈ 1 s.
 - **Actions:** move to one of 8 neighbouring cells, or hover. Moves into walls or obstacles are masked.
+- **Obstacles (M2):** rectangles of 1–4 cells a side placed until the target fraction is covered (`obstacle_layout="scatter"` gives single cells). Enclosed pockets are filled in, so every open cell is reachable from the base. Survivors heading to safety take shortest paths around obstacles, and so do the movement hypotheses; drifting survivors pile up against them.
 - **Search:** the camera searches the cell under the drone and finds each survivor there with the detection probability.
 - **Reward (per drone):** the survivor probability mass its search detects (scaled so an unsearched cell with a uniform prior pays about the detection probability); +10 to every drone per survivor found by anyone; −0.01 per step. Collisions cannot happen (shield).
 - **Observation (per drone, 167 values):** 5 × 5 local patches of freshness, belief (expected survivors), obstacles and teammates; a coarse 5 × 5 summary of the whole map's freshness and belief (the shared team map); own position, battery, time; the two nearest teammates; the scenario profile.
@@ -120,7 +122,7 @@ ARGS="--guide heuristic" TAG=guided sbatch scripts/hpc/train.sbatch   # set --ac
 | Movement | still, wander, drift, to_safety; 0.3–1.5 m/s | — | Only if the operator sets it; otherwise they infer it during the search |
 | Likely zones | none in 60% of scenarios, else 1–5 | 3 | Yes, as the prior heat map |
 | Zone accuracy | 50–100% of survivors in zones | 80% | No |
-| Obstacles | 0–30% of cells | 0 (M1) | Nearby cells only |
+| Obstacles | 0–30% of cells, as 1–4 cell blocks (buildings, rubble) | 0 (M1) | Nearby cells only |
 | Drones | 2–8, one may fail | 3 | Nearby teammates only |
 | Detection per pass | 60–100% | 80% | No |
 

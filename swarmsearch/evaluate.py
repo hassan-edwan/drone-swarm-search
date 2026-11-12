@@ -42,7 +42,18 @@ CONDITIONS = {
 
 # Does the advantage grow with survivor speed? Drift (random direction), known profile.
 SPEED_SWEEP = {f"drift_{v:.1f}mps": _mv("drift", v, True) for v in (0.0, 0.5, 1.0, 1.5)}
-ALL_CONDITIONS = {**CONDITIONS, **SPEED_SWEEP}
+# M2: block obstacles (buildings, rubble). Movement profile unknown unless stated.
+M2_CONDITIONS = {
+    "obs10_wander": _mv("wander", 1.0, False, obstacle_frac=0.1),
+    "obs30_wander": _mv("wander", 1.0, False, obstacle_frac=0.3),
+    "obs20_drift_known": _mv("drift", 1.0, True, obstacle_frac=0.2),
+    "obs20_drift_unknown": _mv("drift", 1.0, False, obstacle_frac=0.2),
+    "obs20_to_safety_known": _mv("to_safety", 1.0, True, obstacle_frac=0.2),
+    "obs20_to_safety_unknown": _mv("to_safety", 1.0, False, obstacle_frac=0.2),
+    "obs20_drone_lost": _mv("wander", 1.0, False, obstacle_frac=0.2, drone_failure=True),
+    "obs_random_mix": _sampled(obstacle_frac=(0.0, 0.3)),
+}
+ALL_CONDITIONS = {**CONDITIONS, **SPEED_SWEEP, **M2_CONDITIONS}
 
 
 def run_episode(env: GridSearchEnv, policy, scenario: Scenario, seed: int) -> dict:

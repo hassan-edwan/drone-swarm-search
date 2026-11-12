@@ -281,3 +281,72 @@ def test_mixture_belief_is_weighted_hypotheses():
         env.step({a: 4 for a in env.agents})
     assert np.allclose(env.belief, np.tensordot(env._w, env._B, axes=1))
     assert len(env._w) > 50
+
+
+# ---------------------------------------------------------------- M2 obstacles
+@pytest.mark.parametrize("layout", ["blocks", "scatter"])
+def test_obstacle_layouts_leave_every_free_cell_reachable(layout):
+    from swarmsearch.obstacles import reachable
+    for seed in range(10):
+        sc = Scenario(obstacle_frac=0.3, obstacle_layout=layout,
+                      movement=MovementProfile("to_safety", 1.0, target=(12, 7)))
+        env = GridSearchEnv(sc, seed=seed)
+        env.reset(seed=seed)
+        assert 0.25 < env.obstacles.mean() < 0.4
+        assert reachable(env.free, env.starts[0])[env.free].all()
+        assert env.free[7, 12] and all(env.free[y, x] for x, y in env.starts)
+        assert all(env.free[y, x] for x, y in env.survivors)
+
+
+def test_distance_field_goes_around_wall():
+    from swarmsearch.obstacles import distance_fields
+    free = np.ones((10, 10), dtype=bool)
+    free[1:10, 5] = False  # wall with a gap at the top
+    d = distance_fields(free, [(8, 8)])[0]
+    assert d[8, 2] == 16  # 8 moves up to the gap at (5, 0), 8 back down
+    assert np.isinf(d[5, 5])
+
+
+def test_to_safety_survivors_path_around_obstacles():
+    """Survivors heading to a safe point behind a wall walk round it instead
+    of piling up against it."""
+    from swarmsearch.belief import move_weights
+    g = 20
+    free = np.ones((g, g), dtype=bool)
+    free[2:g, 10] = False
+    prof = MovementProfile("to_safety", 1.5, target=(15, 15))
+    from swarmsearch.obstacles import distance_fields
+    W = move_weights(prof, free, dist=distance_fields(free, [(15, 15)])[0])
+    assert np.allclose(W.sum(0), 1.0)
+    B = np.zeros((1, g, g))
+    B[0, 15, 3] = 1.0
+    Wk = W[None]
+    from swarmsearch.belief import propagate
+    for _ in range(1500):
+        B = propagate(B, Wk)
+    assert B[0, :, 11:].sum() > 0.9  # made it past the wall
+    # Without path-following they get stuck on the near side.
+    W0 = move_weights(prof, free)
+    B0 = np.zeros((1, g, g))
+    B0[0, 15, 3] = 1.0
+    for _ in range(1500):
+        B0 = propagate(B0, W0[None])
+    assert B0[0, :, 11:].sum() < 0.5
+
+
+def test_path_following_matches_straight_line_on_open_map():
+    from swarmsearch.belief import move_weights
+    from swarmsearch.obstacles import distance_fields
+    free = np.ones((20, 20), dtype=bool)
+    for target in [(3, 17), (10, 10), (19, 0)]:
+        prof = MovementProfile("to_safety", 1.0, target=target)
+        assert np.allclose(move_weights(prof, free), move_weights(prof, free, dist=distance_fields(free, [target])[0]))
+
+
+def test_hypotheses_skip_safe_points_in_obstacles():
+    from swarmsearch.belief import hypothesis_bank
+    free = np.ones((20, 20), dtype=bool)
+    free[:, :10] = False
+    profs, prior = hypothesis_bank(20, free)
+    assert all(free[p.target[1], p.target[0]] for p in profs if p.kind == "to_safety")
+    assert np.isclose(prior.sum(), 1.0)

@@ -166,6 +166,7 @@ class Config:
     guide_coef: float = 1.0  # initial shaping weight
     guide_anneal: float = 0.6  # fraction of training over which the weight fades to 0
     seed: int = 0
+    init_from: str | None = None  # start from a trained model (e.g. M1 -> M2 fine-tuning)
     out_dir: str = "runs/mappo"
     sampler: ScenarioSampler = field(default_factory=ScenarioSampler)
 
@@ -197,6 +198,9 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     net = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided).to(dev)
     vec = net.vec
     T_ = lambda a: torch.from_numpy(a).to(dev)
+    if cfg.init_from:
+        ck = torch.load(cfg.init_from, weights_only=False, map_location="cpu")
+        net.load_state_dict(ck["state_dict"])
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
 
     T, E, A = cfg.rollout_len, cfg.n_envs, MAX_DRONES
