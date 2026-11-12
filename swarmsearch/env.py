@@ -7,11 +7,12 @@ the default), the prior heat map, and what they have searched themselves.
 
 The team keeps a shared belief map: the expected share of survivor mass in
 each cell that has not been detected yet. Searching a cell removes the
-detected share; each step the belief is moved with the same transition model
-the survivors follow, built from the profile the drones were given (which is
-wrong when the operator set nothing and survivors move differently). A
-drone's reward is the survivor mass its search detects, so it pays to be
-where survivors are likely to be now, not where they were.
+detected share; each step the belief is moved with the same movement model
+the survivors follow. With a known profile that model is the truth. Without
+one, the belief is a mixture over movement hypotheses that the team reweights
+from what it finds (see belief.py), so it learns how survivors move during
+the search. A drone's reward is the survivor mass its search detects, so it
+pays to be where survivors are likely to be now, not where they were.
 
 Implements the PettingZoo ParallelEnv API. `possible_agents` is the maximum
 swarm size; each episode activates `scenario.n_drones` of them.
@@ -25,6 +26,8 @@ import numpy as np
 from gymnasium import spaces
 from pettingzoo import ParallelEnv
 
+from . import belief as _belief
+from .belief import DIRECTED, move_weights, propagate
 from .scenario import PROFILE_DIM, Scenario, ScenarioSampler
 
 # Action 8 is hover; 0-7 are the 8 neighbours.
@@ -40,7 +43,7 @@ REWARD_SURVIVOR = 10.0
 PENALTY_COLLISION = 10.0
 PENALTY_STEP = 0.01
 FRESH_REPEAT = 0.9  # searching a cell this fresh counts as a repeat (metric only)
-DIRECTED = 0.8  # drift / to_safety: share of moves along the main direction
+WEIGHT_FLOOR = 1e-4  # keeps every movement hypothesis recoverable
 
 MAX_DRONES = 8
 PATCH_RADIUS = 2
@@ -64,6 +67,9 @@ def map_dim(grid_size: int) -> int:
 
 def state_dim(grid_size: int) -> int:
     return 5 * grid_size * grid_size + 4 + PROFILE_DIM
+
+
+_W_CACHE: dict = {}
 
 
 class GridSearchEnv(ParallelEnv):
@@ -144,7 +150,7 @@ class GridSearchEnv(ParallelEnv):
 
         # Belief = expected remaining survivor mass per cell, starting from
         # the prior. Searching a cell scales it down; movement spreads it.
-        self.belief = self.prior.copy()
+        self._init_belief(sc)
         self.last_searched = np.full((g, g), -1e9)
         self.visited = np.zeros((g, g), dtype=bool)
 
@@ -160,11 +166,8 @@ class GridSearchEnv(ParallelEnv):
         self.n_repeats = 0
         self.n_collisions = 0
         self.n_shield = 0
-        self._decay = sc.observed_profile().move_prob
-        # Same transition model for the truth (survivors) and the belief (assumed profile).
-        self._T_true = self._transition(sc.movement)
-        self._T_true_cum = np.cumsum(self._T_true, axis=1)
-        self._T_belief = self._transition(sc.observed_profile())
+        # Survivors move with the true model; the belief with the hypotheses.
+        self._W_true_cum = np.cumsum(move_weights(sc.movement, self.free), axis=0)
         self.goals = {}
 
         for a in self.agents:
@@ -335,70 +338,73 @@ class GridSearchEnv(ParallelEnv):
             self.n_repeats += 1
         self.last_searched[y, x] = self.t
         self.visited[y, x] = True
-        detected = self.belief[y, x] * self.scenario.detection_prob
-        self.belief[y, x] -= detected
-        reward = REWARD_DETECT * detected * self.n_free
+        p = self.scenario.detection_prob
 
         found = 0
         here = (~self.found) & (self.survivors[:, 0] == x) & (self.survivors[:, 1] == y)
         for i in np.flatnonzero(here):
-            if self.rng.random() < self.scenario.detection_prob:
+            if self.rng.random() < p:
                 self.found[i] = True
                 self.found_times.append(self.t)
                 found += 1
+        if found and len(self._w) > 1:
+            # Each find reweights the hypotheses by the mass they had here.
+            self._w = self._w * (self._B[:, y, x] + 1e-12) ** found
+            self._w = (1 - WEIGHT_FLOOR) * self._w / self._w.sum() + WEIGHT_FLOOR * self._w0
+            self._mix()
+
+        detected = self.belief[y, x] * p
+        self._B[:, y, x] *= 1.0 - p
+        self.belief[y, x] -= detected
+        reward = REWARD_DETECT * detected * self.n_free
         return reward, found
 
-    def _transition(self, prof) -> np.ndarray:
-        """Cell-to-cell move probabilities for one step under a movement profile.
-        Moves into walls or obstacles become staying put."""
-        g = self.grid_size
-        n = g * g
-        T = np.zeros((n, n))
-        p = prof.move_prob
-        rand = [(tuple(m), 1.0 / 8) for m in MOVES[:8]]
-        for y in range(g):
-            for x in range(g):
-                i = y * g + x
-                if not self.free[y, x] or p == 0.0:
-                    T[i, i] = 1.0
-                    continue
-                if prof.kind == "drift":
-                    dirs = [(tuple(prof.drift_dir), DIRECTED)] + [(d, w * (1 - DIRECTED)) for d, w in rand]
-                elif prof.kind == "to_safety":
-                    tx, ty = prof.target
-                    if (x, y) == (tx, ty):
-                        dirs = [((0, 0), 1.0)]  # arrived: stays at the safe point
-                    else:
-                        main = (int(np.sign(tx - x)), int(np.sign(ty - y)))
-                        dirs = [(main, DIRECTED)] + [(d, w * (1 - DIRECTED)) for d, w in rand]
-                else:
-                    dirs = rand
-                T[i, i] += 1.0 - p
-                for (dx, dy), w in dirs:
-                    nx, ny = x + dx, y + dy
-                    if 0 <= nx < g and 0 <= ny < g and self.free[ny, nx]:
-                        T[i, ny * g + nx] += p * w
-                    else:
-                        T[i, i] += p * w
-        return T
+    def _init_belief(self, sc: Scenario):
+        if sc.profile_known:
+            profiles, prior = [sc.movement], np.ones(1)
+        else:
+            profiles, prior = _belief.hypothesis_bank(self.grid_size)
+        key = (tuple(profiles), sc.profile_known, _belief.HYP_DIRECTED) if not self.obstacles.any() else None
+        W = _W_CACHE.get(key) if key else None
+        if W is None:
+            directed = DIRECTED if sc.profile_known else _belief.HYP_DIRECTED
+            W = np.stack([move_weights(pr, self.free, directed) for pr in profiles])
+            if key:
+                _W_CACHE[key] = W
+        self._W = W
+        self._w0 = prior
+        self._w = prior.copy()
+        self._B = np.repeat(self.prior[None], len(profiles), axis=0)
+        self._V = np.stack([pr.as_vector(False, self.grid_size) for pr in profiles])
+        self._V_moveprob = np.array([pr.move_prob for pr in profiles])
+        self._mix()
+
+    def _mix(self):
+        """Shared belief = hypothesis maps weighted by the find-based weights."""
+        self.belief = np.tensordot(self._w, self._B, axes=1)
+        post = self.profile_posterior()
+        self._decay = float(post @ self._V_moveprob)
+
+    def profile_posterior(self) -> np.ndarray:
+        """P(hypothesis | finds and empty searches so far)."""
+        q = self._w * self._B.sum(axis=(1, 2))
+        return q / max(q.sum(), 1e-300)
 
     def _move_survivors(self):
         if self.scenario.movement.move_prob == 0.0:
             return
-        g = self.grid_size
-        for i in np.flatnonzero(~self.found):
-            x, y = self.survivors[i]
-            j = int(np.searchsorted(self._T_true_cum[y * g + x], self.rng.random(), side="right"))
-            j = min(j, g * g - 1)
-            self.survivors[i] = (j % g, j // g)
+        idx = np.flatnonzero(~self.found)
+        if not len(idx):
+            return
+        xs, ys = self.survivors[idx, 0], self.survivors[idx, 1]
+        cum = self._W_true_cum[:, ys, xs]  # (9, n)
+        m = np.minimum((cum < self.rng.random(len(idx))).sum(axis=0), 8)
+        self.survivors[idx] = self.survivors[idx] + MOVES[m]
 
     def _spread_belief(self):
-        if self._decay == 0.0:
-            return
-        g = self.grid_size
-        self.belief = (self.belief.ravel() @ self._T_belief).reshape(g, g)
+        self._B = propagate(self._B, self._W)
+        self._mix()
 
-    # ------------------------------------------------------------ observation
     def action_mask(self, a) -> np.ndarray:
         g = self.grid_size
         nxt = self.pos[a] + MOVES
@@ -458,7 +464,10 @@ class GridSearchEnv(ParallelEnv):
         for i, d in enumerate(rel):
             mate_feats[3 * i : 3 * i + 3] = (d[0] / g, d[1] / g, 1.0)
         parts.append(mate_feats)
-        parts.append(sc.observed_profile().as_vector(sc.profile_known, g))
+        if sc.profile_known:
+            parts.append(sc.movement.as_vector(True, g))
+        else:  # expected profile under the current posterior over hypotheses
+            parts.append(self.profile_posterior() @ self._V)
         if self.guided if guided is None else guided:
             if a in self.goals:
                 gx, gy = self.goals[a]

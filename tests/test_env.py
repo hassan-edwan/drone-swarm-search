@@ -215,15 +215,13 @@ def test_belief_tracks_true_survivor_movement(prof):
                   obstacle_frac=0.1, detection_prob=0.6)
     env = GridSearchEnv(sc, seed=0)
     env.reset(seed=0)
-    T = env._T_true
-    assert np.allclose(T.sum(1), 1.0)
+    assert np.allclose(env._W.sum(1), 1.0) and len(env._w) == 1
     g = env.grid_size
     start = np.zeros(g * g)
     x0, y0 = 4, 10
-    env.free[y0, x0] = True
+    assert env.free[y0, x0]
     start[y0 * g + x0] = 1.0
-    env.belief = start.reshape(g, g).copy()
-    env._decay = prof.move_prob
+    env._B = start.reshape(1, g, g).copy()
     for _ in range(30):
         env._spread_belief()
     counts = np.zeros(g * g)
@@ -252,6 +250,34 @@ def test_reward_is_detected_belief_mass():
     env = GridSearchEnv(Scenario(n_drones=2, n_survivors=1, n_zones=0, detection_prob=0.8), seed=0)
     env.reset(seed=0)
     x, y = env.pos["drone_0"]
-    env.belief[y, x] = 0.01
+    env._B[:, y, x] = 0.01
+    env._mix()
     r, _ = env._search("drone_0")
     assert np.isclose(r, 0.01 * 0.8 * env.n_free) and np.isclose(env.belief[y, x], 0.002)
+
+
+def test_unknown_profile_is_inferred_from_finds():
+    """Without a profile, finds and empty searches shift the posterior toward
+    the true movement type."""
+    from swarmsearch.scenario import MOVEMENTS
+    prof = MovementProfile("drift", 1.5, (1, 0))
+    sc = Scenario(n_drones=6, n_survivors=20, n_zones=0, movement=prof, profile_known=False)
+    env = GridSearchEnv(sc, seed=3)
+    env.reset(seed=3)
+    kinds = np.array([MOVEMENTS.index(k) for k in ("still", "wander", "drift", "to_safety")])
+    p0 = env.profile_posterior() @ env._V[:, :4]
+    rng = np.random.default_rng(0)
+    while env.agents:
+        env.step({a: int(rng.integers(9)) for a in env.agents})
+    p1 = env.profile_posterior() @ env._V[:, :4]
+    assert p1[kinds[2]] > 0.5 > p0[kinds[2]]
+    assert np.isclose(env._w.sum(), 1.0) and np.isclose(p1.sum(), 1.0)
+
+
+def test_mixture_belief_is_weighted_hypotheses():
+    env = GridSearchEnv(Scenario(n_zones=0, profile_known=False), seed=0)
+    env.reset(seed=0)
+    for _ in range(5):
+        env.step({a: 4 for a in env.agents})
+    assert np.allclose(env.belief, np.tensordot(env._w, env._B, axes=1))
+    assert len(env._w) > 50
