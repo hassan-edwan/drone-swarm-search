@@ -1,0 +1,4 @@
+# M3 (3D flight). PyBullet ships wheels for Python <= 3.12; on 3.13 it builds from source.
+-r requirements.txt
+pybullet>=3.2.6
+gym-pybullet-drones @ git+https://github.com/utiasDSL/gym-pybullet-drones.git

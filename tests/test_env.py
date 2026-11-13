@@ -350,3 +350,39 @@ def test_hypotheses_skip_safe_points_in_obstacles():
     profs, prior = hypothesis_bank(20, free)
     assert all(free[p.target[1], p.target[0]] for p in profs if p.kind == "to_safety")
     assert np.isclose(prior.sum(), 1.0)
+
+
+# ------------------------------------------------------------------- M3 3D
+def test_3d_without_disturbance_matches_2d():
+    """Point-mass flight with no wind reaches every cell in time, so the 3D
+    mission is the 2D mission."""
+    from swarmsearch.sim3d import Swarm3D, run_episode_3d
+    sc = Scenario(n_drones=4, movement=MovementProfile("drift", 1.0, (0, 1)), n_zones=0,
+                  obstacle_frac=0.2, max_steps=60)
+    m2 = run_episode(GridSearchEnv(sc), Lawnmower(), sc, seed=1)
+    sim = Swarm3D(GridSearchEnv(sc), backend="pointmass")
+    m3 = run_episode_3d(sim, Lawnmower(), sc, seed=1)
+    assert m3["late_frac"] == 0.0 and m3["near_misses"] == 0 and m3["track_err_m"] < 0.2
+    for k in ("found_frac", "coverage", "time_to_90", "steps"):
+        assert m2[k] == m3[k]
+
+
+def test_3d_late_drones_do_not_search():
+    from swarmsearch.sim3d import Swarm3D, run_episode_3d
+    sc = Scenario(n_drones=3, n_zones=0, max_steps=60)
+    sim = Swarm3D(GridSearchEnv(sc), backend="pointmass", wind=6.0)
+    m = run_episode_3d(sim, Lawnmower(), sc, seed=0)
+    assert m["late_frac"] > 0.05
+    assert sim.env.n_visits <= 3 + (1 - m["late_frac"]) * 3 * 60 + 1e-9
+
+
+def test_env_targets_is_pure():
+    env = GridSearchEnv(Scenario(n_drones=8), seed=0)
+    env.reset(seed=0)
+    acts = {a: 4 for a in env.agents}
+    before = {a: env.pos[a].copy() for a in env.agents}
+    n = env.n_shield
+    t1 = env.targets(acts)
+    assert env.n_shield == n and all((env.pos[a] == before[a]).all() for a in env.agents)
+    env.step(acts)
+    assert all((env.pos[a] == t1[a]).all() for a in t1)

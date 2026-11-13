@@ -209,14 +209,10 @@ class GridSearchEnv(ParallelEnv):
         return np.array(out, dtype=np.int64).reshape(-1, 2)
 
     # ------------------------------------------------------------------- step
-    def step(self, actions):
-        sc = self.scenario
-        g = sc.grid_size
-        self.t += 1
-        rewards = {a: -PENALTY_STEP for a in self.agents}
-        phi0 = {a: self._potential(a) for a in self.agents} if self.guide_coef else {}
-
-        # Move drones; invalid moves (wall, obstacle, occupied cell) become hover.
+    def targets(self, actions, count: bool = False) -> dict:
+        """Cell each live drone will move to this step: invalid moves (wall,
+        obstacle, occupied cell) become hover, then the shield resolves
+        conflicts. Pure unless `count` (then shield stops are counted)."""
         live = [a for a in self.agents if self.alive[a]]
         target = {}
         for a in live:
@@ -224,10 +220,26 @@ class GridSearchEnv(ParallelEnv):
             if not self.action_mask(a)[act]:
                 act = HOVER
             target[a] = self.pos[a] + MOVES[act]
-            self.battery[a] = max(0.0, 1.0 - self.t / sc.max_steps)
         if self.shield:
+            n = self.n_shield
             self._resolve_conflicts(live, target)
+            if not count:
+                self.n_shield = n
+        return target
+
+    def step(self, actions, searching: dict | None = None):
+        """`searching` (3D, M3): drones mapped to False did not physically
+        reach their cell in time and do not search this step."""
+        sc = self.scenario
+        g = sc.grid_size
+        self.t += 1
+        rewards = {a: -PENALTY_STEP for a in self.agents}
+        phi0 = {a: self._potential(a) for a in self.agents} if self.guide_coef else {}
+
+        live = [a for a in self.agents if self.alive[a]]
+        target = self.targets(actions, count=True)
         for a in live:
+            self.battery[a] = max(0.0, 1.0 - self.t / sc.max_steps)
             self.pos[a] = target[a]
 
         # Potential-based shaping toward the guide's target (Ng et al. 1999):
@@ -250,7 +262,7 @@ class GridSearchEnv(ParallelEnv):
         # Search, then survivors move, then belief spreads the same way.
         found_now = 0
         for a in self.agents:
-            if self.alive[a]:
+            if self.alive[a] and (searching is None or searching.get(a, True)):
                 r, f = self._search(a)
                 rewards[a] += r
                 found_now += f
