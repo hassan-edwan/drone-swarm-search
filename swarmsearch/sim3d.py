@@ -35,7 +35,7 @@ from .env import GridSearchEnv
 from .scenario import Scenario
 
 CELL_M = 1.0  # metres per grid cell in the 3D world
-STEP_S = 1.0  # seconds of flight per policy step
+STEP_S = 2.0  # seconds of flight per policy step (1 s flips a Crazyflie on diagonal moves)
 CTRL_HZ = 48  # control rate
 ALT_BASE = 1.0  # cruise altitude of the lowest layer (m)
 ALT_GAP = 0.25  # vertical gap between drones' layers (m)
@@ -181,9 +181,10 @@ class Swarm3D:
         pos = p0
         close = np.zeros((len(p0), len(p0)), dtype=bool)
         for k in range(1, steps + 1):
-            s = min(1.0, k / travel)
-            ref = p0 + (p1 - p0) * s
-            vel = (p1 - p0) / (travel / CTRL_HZ) if k < travel else np.zeros_like(p0)
+            # Smooth (cosine) speed profile: starts and ends at rest.
+            u = min(1.0, k / travel)
+            ref = p0 + (p1 - p0) * (0.5 - 0.5 * np.cos(np.pi * u))
+            vel = (p1 - p0) * (0.5 * np.pi * np.sin(np.pi * u)) / (travel / CTRL_HZ)
             pos = self.flight.step(ref, vel)
             if self.record and k % 4 == 0:
                 self.trace.append(pos.copy())

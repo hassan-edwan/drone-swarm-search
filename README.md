@@ -13,7 +13,7 @@ fixed lawnmower sweep.
 |---|---|---|
 | M1 | 2D grid search env, lawnmower and random baselines, MAPPO and IPPO | **In progress** (env, baselines, trainer, evaluation done; training runs next) |
 | M2 | 2D grid with obstacles | Set up: block layouts, path-following survivors, `--m2` test conditions; not trained yet |
-| M3 | 3D in gym-pybullet-drones, policy waypoints flown by PID | Set up (`scripts/run3d.py`); PyBullet runs need Python ≤ 3.12 |
+| M3 | 3D in gym-pybullet-drones, policy waypoints flown by PID | Running (`scripts/run3d.py`); PyBullet needs Python ≤ 3.12 |
 | M4 | 3D with obstacles | Stretch |
 | M5 | 3D camera with visual blockers | Stretch |
 | M6 | RL flight policy replaces PID | After the course |
@@ -147,6 +147,6 @@ of episodes reaching 90%, fraction found, coverage, repeat fraction, collisions.
 
 ## M3: 3D flight
 
-`swarmsearch/sim3d.py` keeps the 2D environment as the mission layer (belief, survivors, search) and flies every move. Each policy step the shield turns the chosen moves into target cells, then a PID controller flies each drone along a smooth reference to its target cell centre for one step (1 s; one cell = 1 m, Crazyflie scale). A drone that is not within 0.35 m of the cell centre (and 0.3 m of its altitude) at the end of the step does not search that step. Drones cruise on separate altitude layers (1.0 m + 0.25 m each), so paths that cross on the map never meet in the air.
+`swarmsearch/sim3d.py` keeps the 2D environment as the mission layer (belief, survivors, search) and flies every move. Each policy step the shield turns the chosen moves into target cells, then a PID controller flies each drone along a smooth (cosine speed profile) reference to its target cell centre for one step (2 s; one cell = 1 m, Crazyflie scale). With a 1 s step a Crazyflie flips on diagonal moves; at 2 s it tracks to about 1 cm with at most ~21° tilt. A drone that is not within 0.35 m of the cell centre (and 0.3 m of its altitude) at the end of the step does not search that step. Drones cruise on separate altitude layers (1.0 m + 0.25 m each), so paths that cross on the map never meet in the air.
 
 Backends: `pybullet` (gym-pybullet-drones `CtrlAviary`, Crazyflie 2.x, `DSLPIDControl`) and `pointmass` (3D double integrator with acceleration and speed limits, PD tracking and optional wind gusts; runs anywhere and is used by the tests). With no disturbance the point-mass 3D mission reproduces the 2D mission exactly. `scripts/run3d.py` reports 2D vs 3D results on the same missions, plus the share of moves that arrived late, mean tracking error and near misses.
