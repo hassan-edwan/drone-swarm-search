@@ -1,0 +1,30 @@
+| Condition | Method | Mean find time (steps) | Find time (% of budget) | Time to 90% (steps) | Reached 90% | Found | Coverage | Repeats | Collisions | Shield stops |
+|---|---|---|---|---|---|---|---|---|---|---|
+| g30_drift_unknown | lawnmower | 232 ± 7 | 52% | 380 ± 72 | 52% | 84% | 100% | 0% | 0.0 | 0.0 |
+| g30_drift_unknown | belief_greedy | 179 ± 5 | 40% | 277 ± 59 | 98% | 99% | 53% | 0% | 0.0 | 2.2 |
+| g30_drift_unknown | mappo | 189 ± 6 | 42% | 279 ± 62 | 98% | 99% | 55% | 0% | 0.0 | 3.9 |
+| g30_drift_unknown | mappo_T0.5 | 183 ± 5 | 41% | 285 ± 62 | 100% | 99% | 56% | 0% | 0.0 | 4.3 |
+| g30_drift_unknown | mappo_T0.25 | 180 ± 5 | 40% | 286 ± 59 | 98% | 99% | 55% | 0% | 0.0 | 3.7 |
+| g30_drift_unknown | mappo_T0 | 179 ± 4 | 40% | 278 ± 62 | 98% | 99% | 53% | 0% | 0.0 | 4.3 |
+| g30_drift_unknown | mappo_look3 | 179 ± 6 | 40% | 279 ± 76 | 98% | 99% | 54% | 0% | 0.0 | 2.6 |
+| g30_still | lawnmower | 216 ± 7 | 48% | 373 ± 83 | 54% | 85% | 99% | 28% | 0.0 | 0.0 |
+| g30_still | belief_greedy | 210 ± 7 | 47% | 369 ± 82 | 56% | 86% | 99% | 27% | 0.0 | 0.0 |
+| g30_still | mappo | 228 ± 6 | 51% | 405 ± 75 | 34% | 81% | 97% | 33% | 0.0 | 1.1 |
+| g30_still | mappo_T0.5 | 224 ± 7 | 50% | 397 ± 75 | 50% | 83% | 97% | 32% | 0.0 | 0.8 |
+| g30_still | mappo_T0.25 | 220 ± 7 | 49% | 391 ± 78 | 50% | 84% | 98% | 32% | 0.0 | 0.7 |
+| g30_still | mappo_T0 | 223 ± 6 | 50% | 405 ± 60 | 48% | 83% | 99% | 33% | 0.0 | 1.0 |
+| g30_still | mappo_look3 | 220 ± 7 | 49% | 384 ± 75 | 58% | 86% | 98% | 30% | 0.0 | 0.0 |
+| 2_drones_drift_unknown | lawnmower | 149 ± 5 | 50% | 254 ± 51 | 50% | 85% | 99% | 0% | 0.0 | 0.0 |
+| 2_drones_drift_unknown | belief_greedy | 132 ± 3 | 44% | 203 ± 49 | 94% | 97% | 58% | 0% | 0.0 | 1.0 |
+| 2_drones_drift_unknown | mappo | 131 ± 4 | 44% | 200 ± 41 | 100% | 98% | 63% | 0% | 0.0 | 1.5 |
+| 2_drones_drift_unknown | mappo_T0.5 | 125 ± 3 | 42% | 198 ± 35 | 98% | 99% | 60% | 0% | 0.0 | 1.5 |
+| 2_drones_drift_unknown | mappo_T0.25 | 133 ± 3 | 44% | 201 ± 45 | 94% | 98% | 64% | 0% | 0.0 | 1.4 |
+| 2_drones_drift_unknown | mappo_T0 | 127 ± 3 | 42% | 190 ± 33 | 100% | 99% | 61% | 0% | 0.0 | 1.3 |
+| 2_drones_drift_unknown | mappo_look3 | 134 ± 5 | 45% | 205 ± 47 | 96% | 98% | 64% | 0% | 0.0 | 1.1 |
+| 6_drones_drift_unknown | lawnmower | 49 ± 1 | 49% | 91 ± 15 | 40% | 81% | 100% | 0% | 0.0 | 0.0 |
+| 6_drones_drift_unknown | belief_greedy | 55 ± 2 | 55% | 94 ± 12 | 34% | 77% | 93% | 0% | 0.0 | 0.7 |
+| 6_drones_drift_unknown | mappo | 53 ± 1 | 53% | 94 ± 11 | 38% | 79% | 88% | 1% | 0.0 | 5.8 |
+| 6_drones_drift_unknown | mappo_T0.5 | 52 ± 1 | 52% | 91 ± 15 | 32% | 81% | 88% | 1% | 0.0 | 6.5 |
+| 6_drones_drift_unknown | mappo_T0.25 | 54 ± 1 | 54% | 91 ± 12 | 48% | 82% | 90% | 1% | 0.0 | 5.7 |
+| 6_drones_drift_unknown | mappo_T0 | 53 ± 2 | 53% | 91 ± 13 | 44% | 82% | 88% | 1% | 0.0 | 6.7 |
+| 6_drones_drift_unknown | mappo_look3 | 51 ± 1 | 51% | 92 ± 11 | 46% | 83% | 92% | 1% | 0.0 | 3.1 |
