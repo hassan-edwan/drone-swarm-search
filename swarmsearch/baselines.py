@@ -96,3 +96,62 @@ class Lawnmower:
                     best, best_d = int(act), field[ny, nx]
             out[a] = best
         return out
+
+
+class BeliefGreedy:
+    """Hand-written use of the same belief map the learned policy sees: each
+    drone heads for the cell with the most expected detections (plus some
+    credit for its neighbours) per step of travel, skipping cells near teammates'
+    targets, and keeps that target until it gets there or most of its value
+    is gone (re-picking every step makes drones dither between two spots).
+    Tells apart what the belief map is worth from what the learning adds."""
+
+    def __init__(self, claim_radius: int = 2, drop: float = 0.5, neighbour_weight: float = 0.0):
+        self.r = claim_radius
+        self.drop = drop
+        self.nb = neighbour_weight
+
+    def reset(self, env: GridSearchEnv):
+        self.targets: dict[str, tuple[tuple[int, int], float]] = {}
+
+    def act(self, env: GridSearchEnv) -> dict:
+        live = [a for a in env.agents if env.alive.get(a)]
+        if not live:
+            return {}
+        g = env.grid_size
+        cc = env.scenario.corner_cutting
+        gain = env.belief * env.scenario.detection_prob
+        P = np.pad(gain, 1)
+        box = sum(P[1 + dy:1 + dy + g, 1 + dx:1 + dx + g] for dy in (-1, 0, 1) for dx in (-1, 0, 1))
+        val = gain + self.nb * (box - gain)  # the cell itself, plus some credit for a rich neighbourhood
+        for a in list(self.targets):
+            (tx, ty), v0 = self.targets[a]
+            here = tuple(int(v) for v in env.pos[a]) == (tx, ty)
+            if a not in live or here or val[ty, tx] < self.drop * v0:
+                del self.targets[a]
+        need = [a for a in live if a not in self.targets]
+        if need:
+            D = distance_fields(env.free, [tuple(int(v) for v in env.pos[a]) for a in need], cc)
+            taken = ~env.free.copy()
+            for (tx, ty), _ in self.targets.values():
+                taken[max(0, ty - self.r):ty + self.r + 1, max(0, tx - self.r):tx + self.r + 1] = True
+            for k, a in enumerate(need):
+                x, y = (int(v) for v in env.pos[a])
+                score = np.where(taken, -1.0, val / (1.0 + D[k]))
+                score[y, x] = -1.0  # just searched it
+                ty, tx = np.unravel_index(int(np.argmax(score)), score.shape)
+                self.targets[a] = ((int(tx), int(ty)), float(val[ty, tx]))
+                taken[max(0, ty - self.r):ty + self.r + 1, max(0, tx - self.r):tx + self.r + 1] = True
+        Dt = distance_fields(env.free, [self.targets[a][0] for a in live], cc)
+        out = {}
+        for k, a in enumerate(live):
+            mask = env.action_mask(a)
+            nxt = env.pos[a] + MOVES
+            best, best_key = HOVER, None
+            for m in np.flatnonzero(mask):
+                nx, ny = int(nxt[m, 0]), int(nxt[m, 1])
+                key = (Dt[k, ny, nx], -gain[ny, nx])  # closer to target, then more to find on the way
+                if best_key is None or key < best_key:
+                    best, best_key = int(m), key
+            out[a] = best
+        return out

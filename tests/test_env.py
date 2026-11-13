@@ -431,3 +431,52 @@ def test_wind_pushes_drones_off_their_cells():
     windy = run_episode_3d(Swarm3D(GridSearchEnv(sc), backend="pointmass", wind=3.0, wind_mean=2.0),
                            Lawnmower(), sc, seed=0)
     assert windy["track_err_m"] > 3 * calm["track_err_m"]
+
+
+def test_find_time_metric_counts_unfound_as_budget():
+    from swarmsearch.scenario import Scenario
+    env = GridSearchEnv(Scenario(n_survivors=4, max_steps=10))
+    env.reset(seed=0)
+    env.found_times = [2, 4]
+    m = env.metrics()
+    assert m["find_time"] == (2 + 4 + 10 + 10) / 4
+    assert abs(m["find_time_frac"] - m["find_time"] / 10) < 1e-12
+
+
+def test_belief_cache_separates_grid_sizes():
+    from swarmsearch.scenario import Scenario
+    for g in (20, 30):
+        env = GridSearchEnv(Scenario(grid_size=g))
+        env.reset(seed=0)
+        assert env._W.shape[-1] == g
+
+
+def test_belief_greedy_and_lookahead_run_on_any_size():
+    import torch
+    from swarmsearch.baselines import BeliefGreedy
+    from swarmsearch.evaluate import M5_CONDITIONS, run_episode
+    from swarmsearch.mappo import ActorCritic, LearnedPolicy
+    net = ActorCritic(20, True)
+    for cond in ("g30_still", "2_drones_drift_unknown"):
+        sc = M5_CONDITIONS[cond](0)
+        for pol in (BeliefGreedy(), LearnedPolicy(net, lookahead=3), LearnedPolicy(net, temperature=0.5)):
+            m = run_episode(GridSearchEnv(sc), pol, sc, seed=0)
+            assert m["steps"] <= sc.max_steps and m["collisions"] == 0
+
+
+def test_belief_greedy_beats_random_on_still_survivors():
+    from swarmsearch.baselines import BeliefGreedy, RandomWalk
+    from swarmsearch.evaluate import CONDITIONS, run_episode
+    sc = CONDITIONS["still"](0)
+    bg = np.mean([run_episode(GridSearchEnv(sc), BeliefGreedy(), sc, seed=s)["find_time"] for s in range(3)])
+    rw = np.mean([run_episode(GridSearchEnv(sc), RandomWalk(0), sc, seed=s)["find_time"] for s in range(3)])
+    assert bg < rw
+
+
+def test_path_value_prefers_mass_and_discounts_revisits():
+    from swarmsearch.lookahead import path_value
+    gain = np.zeros((5, 5)); gain[0, 4] = 1.0
+    free = np.ones((5, 5), bool)
+    assert path_value(gain, free, (2, 2), 3, 0.8) == 1.0  # reaches the mass in 2 moves
+    assert path_value(gain, free, (0, 4), 3, 0.8) == 0.0  # too far
+    assert abs(path_value(gain, free, (4, 0), 3, 0.8) - 1.24) < 1e-12  # search there three times: 1 + 0.2 + 0.04

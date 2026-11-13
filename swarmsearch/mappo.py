@@ -30,6 +30,7 @@ import torch.nn as nn
 
 from .env import GUIDE_DIM, MAP_CHANNELS, MAX_DRONES, N_ACTIONS, GridSearchEnv, map_dim, obs_dim, state_dim
 from .guide import apply_plans, make_guide
+from .lookahead import path_value
 from .scenario import ScenarioSampler
 
 
@@ -382,12 +383,24 @@ def load(path: str | Path) -> tuple[ActorCritic, dict]:
 
 
 class LearnedPolicy:
-    """Wraps a trained actor with the same reset/act interface as the baselines."""
+    """Wraps a trained actor with the same reset/act interface as the baselines.
+
+    temperature < 1 sharpens the action distribution (0 = always the top
+    action). lookahead = H > 0 re-ranks each drone's top_k moves by the
+    expected detections on the best H-step path from the cell each leads to
+    (see lookahead.py); drones choose in turn and later ones do not count the
+    cells earlier ones just claimed. Both apply at run time only.
+    """
 
     def __init__(self, net: ActorCritic, greedy: bool = False, seed: int = 0, guide=None,
-                 guide_every: int = 25):
+                 guide_every: int = 25, temperature: float = 1.0, lookahead: int = 0, top_k: int = 3,
+                 min_prob: float = 0.05):
         self.net = net
-        self.greedy = greedy
+        self.greedy = greedy or temperature == 0
+        self.temperature = temperature
+        self.lookahead = lookahead
+        self.top_k = top_k
+        self.min_prob = min_prob
         self.guide = guide
         self.guide_every = guide_every
         if net.guided and guide is None:
@@ -408,5 +421,28 @@ class LearnedPolicy:
         m = torch.from_numpy(np.stack([env.action_mask(a) for a in agents]).astype(np.float32))
         with torch.no_grad():
             d = self.net.dist(o, m)
-            act = d.probs.argmax(-1) if self.greedy else d.sample()
+            if self.lookahead:
+                return self._rerank(env, agents, d.probs.numpy())
+            if self.greedy:
+                act = d.probs.argmax(-1)
+            elif self.temperature != 1.0:
+                act = torch.distributions.Categorical(logits=d.logits / self.temperature).sample()
+            else:
+                act = d.sample()
         return {a: int(x) for a, x in zip(agents, act)}
+
+    def _rerank(self, env, agents, probs) -> dict:
+        from .env import MOVES
+        sc = env.scenario
+        gain = env.belief * sc.detection_prob
+        out = {}
+        for a, p in zip(agents, probs):
+            cand = [int(c) for c in np.argsort(-p)[: self.top_k] if p[c] >= self.min_prob * p.max()]
+            nxt = [env.pos[a] + MOVES[c] for c in cand]
+            val = [path_value(gain, env.free, n, self.lookahead, sc.detection_prob, sc.corner_cutting) for n in nxt]
+            best = max(range(len(cand)), key=lambda i: (val[i], p[cand[i]]))
+            out[a] = cand[best]
+            bx, by = nxt[best]
+            gain = gain.copy()
+            gain[by, bx] *= 1.0 - sc.detection_prob  # this drone searches it next step
+        return out

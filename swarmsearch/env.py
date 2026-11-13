@@ -373,7 +373,8 @@ class GridSearchEnv(ParallelEnv):
             profiles, prior = [sc.movement], np.ones(1)
         else:
             profiles, prior = _belief.hypothesis_bank(self.grid_size, self.free)
-        key = (tuple(profiles), sc.profile_known, _belief.HYP_DIRECTED) if not self.obstacles.any() else None
+        key = ((self.grid_size, tuple(profiles), sc.profile_known, _belief.HYP_DIRECTED)
+               if not self.obstacles.any() else None)
         W = _W_CACHE.get(key) if key else None
         if W is None:
             directed = DIRECTED if sc.profile_known else _belief.HYP_DIRECTED
@@ -538,10 +539,15 @@ class GridSearchEnv(ParallelEnv):
         n = len(self.found)
         need = int(np.ceil(0.9 * n)) if n else 0
         t90 = self.found_times[need - 1] if need and len(self.found_times) >= need else None
+        # Mean time to find a survivor; one never found counts as the whole budget.
+        budget = self.scenario.max_steps
+        find_time = (sum(self.found_times) + (n - len(self.found_times)) * budget) / n if n else 0.0
         return {
             "survivors": n,
             "found_frac": float(self.found.mean()) if n else 1.0,
             "time_to_90": t90,
+            "find_time": float(find_time),
+            "find_time_frac": float(find_time / budget),
             "coverage": float(self.visited[self.free].mean()),
             "repeat_frac": self.n_repeats / max(1, self.n_visits),
             "collisions": self.n_collisions,
