@@ -42,7 +42,7 @@ def main():
     for path in a.models:
         net, cfg = load(path)
         arch = cfg.get("arch") or ("cnn" if cfg.get("full_map") else "mlp")
-        name = cfg["algo"] + ("" if arch == "mlp" else f"_{arch}")
+        name = (Path(path).stem if len(a.models) > 1 else cfg["algo"]) + ("" if arch == "mlp" else f"_{arch}")
         spec = a.guide or cfg.get("guide", "none")
         guide = make_guide(spec) if net.guided else None
         if guide is not None:

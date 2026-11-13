@@ -168,6 +168,12 @@ class Config:
     guide_anneal: float = 0.6  # fraction of training over which the weight fades to 0
     seed: int = 0
     init_from: str | None = None  # start from a trained model (e.g. M1 -> M2 fine-tuning)
+    # RL fine-tuning of an imitation policy (M5): keep the actor close to a
+    # frozen anchor actor (KL, fading to 0) and train only the critic at first.
+    bc_anchor: str | None = None
+    bc_coef: float = 1.0
+    bc_anneal: float = 0.5  # fraction of training over which bc_coef fades to 0
+    critic_warmup: int = 0  # updates with the actor frozen while the critic learns
     out_dir: str = "runs/mappo"
     sampler: ScenarioSampler = field(default_factory=ScenarioSampler)
 
@@ -203,6 +209,11 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
         ck = torch.load(cfg.init_from, weights_only=False, map_location="cpu")
         net.load_state_dict(ck["state_dict"])
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
+    anchor = None
+    if cfg.bc_anchor:
+        anchor = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided).to(dev)
+        anchor.load_state_dict(torch.load(cfg.bc_anchor, weights_only=False, map_location="cpu")["state_dict"])
+        anchor.eval()
 
     T, E, A = cfg.rollout_len, cfg.n_envs, MAX_DRONES
     o_dim = vec + (map_dim(g) if cfg.arch != "mlp" else 0)
@@ -328,6 +339,10 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
 
         n = len(b_obs)
         mb = max(1, n // cfg.minibatches)
+        warm = update <= cfg.critic_warmup
+        kl_coef = 0.0
+        if anchor is not None:
+            kl_coef = cfg.bc_coef * max(0.0, 1.0 - (update - 1) / max(1, int(cfg.bc_anneal * n_updates)))
         for _ in range(cfg.epochs):
             perm = torch.randperm(n, device=dev)
             for s in range(0, n, mb):
@@ -339,6 +354,13 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
                 vl = ((net.value(b_cin[j]) - b_ret[j]) ** 2).mean()
                 ent = d.entropy().mean()
                 loss = pl + cfg.vf_coef * vl - cfg.ent_coef * ent
+                if kl_coef > 0:
+                    with torch.no_grad():
+                        q = anchor.dist(b_obs[j], b_mask[j]).probs
+                    kl = (q * (torch.log(q + 1e-8) - torch.log(d.probs + 1e-8))).sum(-1).mean()
+                    loss = loss + kl_coef * kl
+                if warm:  # critic only: the actor keeps the imitation policy
+                    loss = cfg.vf_coef * vl
                 opt.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(net.parameters(), cfg.max_grad_norm)

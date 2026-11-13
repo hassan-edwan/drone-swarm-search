@@ -35,6 +35,10 @@ def main():
     p.add_argument("--guide-anneal", type=float, default=0.6,
                    help="fraction of training over which the guide's shaping bonus fades to 0")
     p.add_argument("--init", default=None, help="start from this model.pt (e.g. fine-tune M1 -> M2)")
+    p.add_argument("--bc-anchor", default=None, help="keep the actor close to this model's actor (KL, fading)")
+    p.add_argument("--bc-coef", type=float, default=1.0)
+    p.add_argument("--bc-anneal", type=float, default=0.5, help="fraction of training over which the KL weight fades")
+    p.add_argument("--critic-warmup", type=int, default=0, help="updates training only the critic")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--out", default=None)
@@ -54,6 +58,10 @@ def main():
         guide_anneal=a.guide_anneal,
         seed=a.seed,
         init_from=a.init,
+        bc_anchor=a.bc_anchor,
+        bc_coef=a.bc_coef,
+        bc_anneal=a.bc_anneal,
+        critic_warmup=a.critic_warmup,
         out_dir=a.out or f"runs/{a.algo}",
         sampler=ScenarioSampler(grid_size=a.grid, obstacle_frac=(0.0, a.obstacles)),
     )
