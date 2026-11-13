@@ -14,7 +14,7 @@ fixed lawnmower sweep.
 | M1 | 2D grid search env, lawnmower and random baselines, MAPPO and IPPO | **In progress** (env, baselines, trainer, evaluation done; training runs next) |
 | M2 | 2D grid with obstacles | Set up: block layouts, path-following survivors, `--m2` test conditions; not trained yet |
 | M3 | 3D in gym-pybullet-drones, policy waypoints flown by PID | Running (`scripts/run3d.py`); PyBullet needs Python ≤ 3.12 |
-| M4 | 3D with obstacles | Stretch |
+| M4 | 3D with obstacles | Set up (`run3d.py --m4`): buildings taller than the drones, flown round |
 | M5 | 3D camera with visual blockers | Stretch |
 | M6 | RL flight policy replaces PID | After the course |
 
@@ -150,3 +150,9 @@ of episodes reaching 90%, fraction found, coverage, repeat fraction, collisions.
 `swarmsearch/sim3d.py` keeps the 2D environment as the mission layer (belief, survivors, search) and flies every move. Each policy step the shield turns the chosen moves into target cells, then a PID controller flies each drone along a smooth (cosine speed profile) reference to its target cell centre for one step (2 s; one cell = 1 m, Crazyflie scale). With a 1 s step a Crazyflie flips on diagonal moves; at 2 s it tracks to about 1 cm with at most ~21° tilt. A drone that is not within 0.35 m of the cell centre (and 0.3 m of its altitude) at the end of the step does not search that step. Drones cruise on separate altitude layers (1.0 m + 0.25 m each), so paths that cross on the map never meet in the air.
 
 Backends: `pybullet` (gym-pybullet-drones `CtrlAviary`, Crazyflie 2.x, `DSLPIDControl`) and `pointmass` (3D double integrator with acceleration and speed limits, PD tracking and optional wind gusts; runs anywhere and is used by the tests). With no disturbance the point-mass 3D mission reproduces the 2D mission exactly. `scripts/run3d.py` reports 2D vs 3D results on the same missions, plus the share of moves that arrived late, mean tracking error and near misses.
+
+**Wind.** Both backends take a steady wind (`--wind-mean`, random heading per episode) and gusts (`--wind`, smoothly varying, different per drone), as accelerations in m/s² (1 m/s² is 0.027 N on a Crazyflie). In PyBullet the force is applied at every physics substep (240 Hz). Crazyflies hold their cells up to about 2 m/s² of gusts; near 3 m/s² most moves arrive late and drones start to crash. `--wind-sweep` repeats the evaluation at 0, 1, 2, 2.5 and 3 m/s².
+
+## M4: 3D obstacles
+
+With `run3d.py --m4`, obstacle cells become buildings 2.5–4 m tall, above every cruise layer, so drones have to fly round them. Diagonal moves past a building's corner are masked (`Scenario.corner_cutting=False`: the corner lies exactly on the diagonal), the obstacle layout guarantees every open cell is still reachable under that rule, and the lawnmower path-finds with it too. Flights report building hits (a drone within its 8 cm radius of a building below the roof) and crashed drones (below 0.3 m during the mission). The M4 conditions (`m4_*` in `evaluate.py`) use 20–30% buildings with unknown survivor movement.

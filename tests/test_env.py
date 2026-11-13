@@ -386,3 +386,48 @@ def test_env_targets_is_pure():
     assert env.n_shield == n and all((env.pos[a] == before[a]).all() for a in env.agents)
     env.step(acts)
     assert all((env.pos[a] == t1[a]).all() for a in t1)
+
+
+# --------------------------------------------------------------- M4 buildings
+def test_no_corner_cutting_masks_diagonals_past_blocked_cells():
+    env = GridSearchEnv(Scenario(n_drones=2, corner_cutting=False), seed=0)
+    env.reset(seed=0)
+    a = "drone_0"
+    env.pos[a] = np.array([5, 5])
+    env.pos["drone_1"] = np.array([15, 15])
+    env.obstacles[:] = False
+    env.obstacles[5, 6] = True  # cell east of the drone
+    env.free = ~env.obstacles
+    m = env.action_mask(a)
+    # (1, -1) and (1, 1) pass the blocked east cell's corner; (-1, *) do not.
+    assert m[2] == 0 and m[7] == 0 and m[0] == 1 and m[5] == 1 and m[4] == 0
+
+
+def test_m4_lawnmower_flies_round_buildings_without_touching():
+    from swarmsearch.sim3d import Swarm3D, run_episode_3d
+    sc = Scenario(n_drones=4, n_zones=0, obstacle_frac=0.25, corner_cutting=False, max_steps=80)
+    sim = Swarm3D(GridSearchEnv(sc), backend="pointmass", physical_obstacles=True)
+    m = run_episode_3d(sim, Lawnmower(), sc, seed=2)
+    assert sim.boxes and m["obstacle_hits"] == 0 and m["crashed"] == 0 and m["late_frac"] == 0.0
+    assert m["coverage"] > 0.2
+
+
+def test_m4_corner_cut_would_hit_building():
+    """Sanity check of the hit detector: a diagonal past a building's corner touches it."""
+    from swarmsearch.sim3d import Swarm3D
+    sc = Scenario(n_drones=1, n_zones=0)
+    sim = Swarm3D(GridSearchEnv(sc), backend="pointmass", physical_obstacles=True)
+    sim.reset(sc, 0)
+    sim._box_arr = np.array([[5.5, 5.5, 0.5, 0.5, 3.0]])
+    corner = np.array([[6.0, 6.0, 1.0]])
+    assert sim._touching_obstacle(corner).all()
+    assert not sim._touching_obstacle(np.array([[6.5, 6.5, 1.0]])).any()
+
+
+def test_wind_pushes_drones_off_their_cells():
+    from swarmsearch.sim3d import Swarm3D, run_episode_3d
+    sc = Scenario(n_drones=3, n_zones=0, max_steps=40)
+    calm = run_episode_3d(Swarm3D(GridSearchEnv(sc), backend="pointmass"), Lawnmower(), sc, seed=0)
+    windy = run_episode_3d(Swarm3D(GridSearchEnv(sc), backend="pointmass", wind=3.0, wind_mean=2.0),
+                           Lawnmower(), sc, seed=0)
+    assert windy["track_err_m"] > 3 * calm["track_err_m"]

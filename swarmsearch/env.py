@@ -135,7 +135,8 @@ class GridSearchEnv(ParallelEnv):
             keep = list(self.starts)
             if sc.movement.kind == "to_safety":
                 keep.append(tuple(sc.movement.target))
-            self.obstacles = make_obstacles(rng, g, sc.obstacle_frac, keep, sc.obstacle_layout)
+            self.obstacles = make_obstacles(rng, g, sc.obstacle_frac, keep, sc.obstacle_layout,
+                                            corner_cut=sc.corner_cutting)
         self.free = ~self.obstacles
         self.n_free = int(self.free.sum())
 
@@ -429,6 +430,12 @@ class GridSearchEnv(ParallelEnv):
         nxt = self.pos[a] + MOVES
         ok = (nxt[:, 0] >= 0) & (nxt[:, 0] < g) & (nxt[:, 1] >= 0) & (nxt[:, 1] < g)
         ok[ok] &= self.free[nxt[ok, 1], nxt[ok, 0]]
+        if not self.scenario.corner_cutting:  # M4: don't cut a building's corner diagonally
+            x, y = self.pos[a]
+            for m in range(8):
+                dx, dy = MOVES[m]
+                if ok[m] and dx and dy:
+                    ok[m] = self.free[y, x + dx] and self.free[y + dy, x]
         if self.shield:
             for b in self.agents:
                 if b != a and self.alive.get(b):

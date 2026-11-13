@@ -68,6 +68,7 @@ class Scenario:
     zone_accuracy: float = 0.8  # fraction of survivors placed inside zones
     obstacle_frac: float = 0.0  # M1: 0; M2: up to 0.3
     obstacle_layout: str = "blocks"  # blocks (buildings, rubble) or scatter (single cells)
+    corner_cutting: bool = True  # M4 (tall buildings): False forbids diagonal moves past a blocked corner
     detection_prob: float = 0.8
     drone_failure: bool = False  # one drone is lost at a random step
     max_steps: int = 200

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from .env import GridSearchEnv
@@ -53,7 +55,19 @@ M2_CONDITIONS = {
     "obs20_drone_lost": _mv("wander", 1.0, False, obstacle_frac=0.2, drone_failure=True),
     "obs_random_mix": _sampled(obstacle_frac=(0.0, 0.3)),
 }
-ALL_CONDITIONS = {**CONDITIONS, **SPEED_SWEEP, **M2_CONDITIONS}
+# M4: obstacles are buildings taller than the cruise layers (flown in 3D with
+# scripts/run3d.py --m4); no diagonal moves past a building's corner.
+def _no_corners(make):
+    return lambda seed: replace(make(seed), corner_cutting=False)
+
+
+M4_CONDITIONS = {
+    "m4_drift_unknown": _no_corners(_mv("drift", 1.0, False, obstacle_frac=0.2)),
+    "m4_to_safety_unknown": _no_corners(_mv("to_safety", 1.0, False, obstacle_frac=0.2)),
+    "m4_dense_wander": _no_corners(_mv("wander", 1.0, False, obstacle_frac=0.3)),
+    "m4_random_mix": _no_corners(_sampled(obstacle_frac=(0.1, 0.3))),
+}
+ALL_CONDITIONS = {**CONDITIONS, **SPEED_SWEEP, **M2_CONDITIONS, **M4_CONDITIONS}
 
 
 def run_episode(env: GridSearchEnv, policy, scenario: Scenario, seed: int) -> dict:

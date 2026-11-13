@@ -6,28 +6,15 @@ Both act through the same env interface as the learned policy:
 
 from __future__ import annotations
 
-from collections import deque
-
 import numpy as np
 
 from .env import HOVER, MOVES, GridSearchEnv
+from .obstacles import distance_fields
 
 
-def distance_field(free: np.ndarray, target: tuple[int, int]) -> np.ndarray:
-    """8-connected BFS distance from every cell to `target` (inf if blocked)."""
-    g = free.shape[0]
-    dist = np.full((g, g), np.inf)
-    tx, ty = target
-    dist[ty, tx] = 0
-    q = deque([(tx, ty)])
-    while q:
-        x, y = q.popleft()
-        for dx, dy in MOVES[:8]:
-            nx, ny = x + dx, y + dy
-            if 0 <= nx < g and 0 <= ny < g and free[ny, nx] and dist[ny, nx] == np.inf:
-                dist[ny, nx] = dist[y, x] + 1
-                q.append((nx, ny))
-    return dist
+def distance_field(free: np.ndarray, target: tuple[int, int], corner_cut: bool = True) -> np.ndarray:
+    """8-neighbour shortest-path distance from every cell to `target` (inf if blocked)."""
+    return distance_fields(free, [target], corner_cut)[0]
 
 
 class RandomWalk:
@@ -67,7 +54,7 @@ class Lawnmower:
 
     def _field(self, env, target):
         if target not in self._fields:
-            self._fields[target] = distance_field(env.free, target)
+            self._fields[target] = distance_field(env.free, target, env.scenario.corner_cutting)
         return self._fields[target]
 
     def act(self, env: GridSearchEnv) -> dict:
@@ -87,8 +74,14 @@ class Lawnmower:
             if max(abs(step[0]), abs(step[1])) == 1:
                 # Next waypoint is a neighbour: step straight to it.
                 act = int(np.flatnonzero((MOVES == step).all(axis=1))[0])
-                out[a] = act if mask[act] else HOVER
-                continue
+                if mask[act]:
+                    out[a] = act
+                    continue
+                if env.free[target[1], target[0]] and not env.scenario.corner_cutting:
+                    pass  # blocked corner: path-find round it below
+                else:
+                    out[a] = HOVER
+                    continue
             # Otherwise path-find, skipping waypoints that are unreachable.
             for _ in range(len(route)):
                 target = route[self.idx[a] % len(route)]
