@@ -68,6 +68,9 @@ python scripts/train.py --algo mappo --arch transformer --steps 2000000 --out ru
 python scripts/train.py --algo mappo --obstacles 0.3 --init models/m1.pt --out runs/mappo_m2
 python scripts/evaluate.py --models runs/mappo_m2/model.pt --m2 --episodes 100
 
+# A second machine: scripts/kaggle/train_kaggle.ipynb runs one training + evaluation on a
+# Kaggle CPU session and pushes the model and results to branch kaggle/<TAG>
+
 # Compare everything on the same held-out scenarios
 python scripts/evaluate.py --models runs/mappo/model.pt runs/ippo/model.pt --episodes 50
 
