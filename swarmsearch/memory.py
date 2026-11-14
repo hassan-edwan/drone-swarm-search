@@ -128,3 +128,27 @@ def fit(net: RecurrentActor, seqs: list, epochs: int = 4, batch: int = 32, lr: f
             correct += int(((logits.argmax(-1) == Y) & valid).sum())
         log(f"  epoch {ep + 1}/{epochs} loss {tot / n_steps:.3f} acc {correct / n_steps:.3f}")
     return correct / n_steps
+
+
+class GRUPolicy:
+    """Runs a RecurrentActor with the baselines' reset/act interface (top action)."""
+
+    def __init__(self, net: RecurrentActor):
+        self.net = net.eval()
+
+    def reset(self, env):
+        self.h = {}
+
+    def act(self, env, obs=None) -> dict:
+        agents = list(env.agents)
+        if not agents:
+            return {}
+        o = torch.from_numpy(np.stack([env._obs(a) for a in agents])).unsqueeze(1)
+        m = torch.from_numpy(np.stack([env.action_mask(a) for a in agents]))
+        h0 = torch.cat([self.h.get(a, torch.zeros(1, 1, self.net.hidden)) for a in agents], 1)
+        with torch.no_grad():
+            logits, h1 = self.net(o, h0)
+        logits = logits[:, 0].masked_fill(m == 0, -1e9)
+        for i, a in enumerate(agents):
+            self.h[a] = h1[:, i : i + 1]
+        return {a: int(x) for a, x in zip(agents, logits.argmax(-1))}
