@@ -29,13 +29,13 @@ from .scenario import ScenarioSampler
 
 
 def _rollouts(args) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict]]:
-    sampler, n_episodes, seed, state_dict, beta = args
+    sampler, n_episodes, seed, state_dict, beta, team = args
     torch.set_num_threads(1)
     rng = np.random.default_rng(seed)
-    env = GridSearchEnv(sampler=sampler, seed=seed)
+    env = GridSearchEnv(sampler=sampler, seed=seed, team=team)
     net = None
     if state_dict is not None:
-        net = ActorCritic(sampler.grid_size, True)
+        net = ActorCritic(sampler.grid_size, True, team=team)
         net.load_state_dict(state_dict)
         net.eval()
     O, M, A, metrics = [], [], [], []
@@ -64,10 +64,10 @@ def _rollouts(args) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict]]:
 
 
 def collect(sampler: ScenarioSampler, n_episodes: int, seed: int, net: ActorCritic | None = None,
-            beta: float = 1.0, workers: int = 4):
+            beta: float = 1.0, workers: int = 4, team: bool = False):
     sd = None if net is None else {k: v.cpu() for k, v in net.state_dict().items()}
     per = [n_episodes // workers + (i < n_episodes % workers) for i in range(workers)]
-    jobs = [(sampler, n, seed * 1000 + i, sd, beta) for i, n in enumerate(per) if n]
+    jobs = [(sampler, n, seed * 1000 + i, sd, beta, team) for i, n in enumerate(per) if n]
     with mp.get_context("fork").Pool(len(jobs)) as pool:
         parts = pool.map(_rollouts, jobs)
     O, M, A = (np.concatenate([p[k] for p in parts]) for k in range(3))

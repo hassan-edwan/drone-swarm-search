@@ -52,6 +52,15 @@ COARSE = 5
 N_TEAMMATES = 2
 # Full shared-map view (optional): freshness, belief, obstacles, self, teammates.
 MAP_CHANNELS = 5
+# Team layers (optional, M5): every teammate drawn on maps, so the input size
+# does not depend on team size. Positions (coarse count; the local patch
+# already shows them), trails (each cell a teammate passed, fading with age)
+# and intent (the next INTENT_STEPS cells along each teammate's recent heading).
+TRAIL_TAU = 7.0  # trail weight exp(-age / tau): ~0.24 after 10 steps, ~0.06 after 20
+HEADING_WINDOW = 5  # heading = mean move over the last few steps
+INTENT_STEPS = 5
+TEAM_DIM = 2 * (2 * PATCH_RADIUS + 1) ** 2 + 3 * COARSE * COARSE
+
 # Guidance input (optional): direction to the guide's target cell + "has target".
 GUIDE_DIM = 3
 GUIDE_GAMMA = 0.99  # discount used in the potential-based shaping bonus
@@ -85,6 +94,7 @@ class GridSearchEnv(ParallelEnv):
         full_map: bool = False,
         guided: bool = False,
         shield: bool = True,
+        team: bool = False,
     ):
         if scenario is None and sampler is None:
             scenario = Scenario()
@@ -96,13 +106,14 @@ class GridSearchEnv(ParallelEnv):
         self.rng = np.random.default_rng(seed)
         self.full_map = full_map
         self.guided = guided
+        self.team = team
         # Safety shield: drones never move into a teammate's cell, and
         # simultaneous claims on one cell (or head-on swaps) are resolved
         # before anyone moves. Active in training and deployment alike.
         self.shield = shield
         self.guide_coef = 0.0  # shaping weight, set (and annealed) by the trainer
         self.goals: dict[str, tuple[int, int]] = {}
-        self._obs_dim = obs_dim() + (GUIDE_DIM if guided else 0) + (map_dim(grid) if full_map else 0)
+        self._obs_dim = obs_dim() + (GUIDE_DIM if guided else 0) + (TEAM_DIM if team else 0) + (map_dim(grid) if full_map else 0)
         self._state_dim = state_dim(grid)
         self.agents: list[str] = []
 
@@ -153,6 +164,10 @@ class GridSearchEnv(ParallelEnv):
 
         self.pos = {a: np.array(self.starts[i]) for i, a in enumerate(self.agents)}
         self.alive = {a: True for a in self.agents}
+        self.trail_t = {a: np.full((g, g), -1e9) for a in self.agents}
+        self.history = {a: [self.pos[a].copy()] for a in self.agents}
+        for a in self.agents:
+            self.trail_t[a][self.pos[a][1], self.pos[a][0]] = 0
         self.battery = {a: 1.0 for a in self.agents}
         self.fail_step = (
             int(rng.integers(sc.max_steps // 4, 3 * sc.max_steps // 4)) if sc.drone_failure else -1
@@ -242,6 +257,8 @@ class GridSearchEnv(ParallelEnv):
         for a in live:
             self.battery[a] = max(0.0, 1.0 - self.t / sc.max_steps)
             self.pos[a] = target[a]
+            self.trail_t[a][self.pos[a][1], self.pos[a][0]] = self.t
+            self.history[a] = (self.history[a] + [self.pos[a].copy()])[-(HEADING_WINDOW + 1):]
 
         # Potential-based shaping toward the guide's target (Ng et al. 1999):
         # it speeds learning without changing which policy is optimal.
@@ -461,7 +478,30 @@ class GridSearchEnv(ParallelEnv):
         # Scale so that a uniform prior reads 1.0 per free cell.
         return np.clip(self.belief * self.n_free, 0.0, 5.0)
 
-    def _obs(self, a, full_map: bool | None = None, guided: bool | None = None) -> np.ndarray:
+    def team_maps(self, a) -> tuple[np.ndarray, np.ndarray]:
+        """Trail and intent maps of a's live teammates (values in [0, 1])."""
+        g = self.grid_size
+        trail = np.zeros((g, g))
+        intent = np.zeros((g, g))
+        for b in self.possible_agents[: self.scenario.n_drones]:
+            if b == a or not self.alive.get(b):
+                continue
+            np.maximum(trail, np.exp(-(self.t - self.trail_t[b]) / TRAIL_TAU), out=trail)
+            h = self.history[b]
+            if len(h) < 2:
+                continue
+            v = (h[-1] - h[0]) / (len(h) - 1)
+            if np.hypot(*v) < 0.2:  # hovering: no heading
+                continue
+            for s in range(1, INTENT_STEPS + 1):
+                cx, cy = (int(round(c)) for c in h[-1] + v * s)
+                if not (0 <= cx < g and 0 <= cy < g) or self.obstacles[cy, cx]:
+                    break
+                intent[cy, cx] = max(intent[cy, cx], 1.0 - (s - 1) / INTENT_STEPS)
+        return trail, intent
+
+    def _obs(self, a, full_map: bool | None = None, guided: bool | None = None,
+             team: bool | None = None) -> np.ndarray:
         """Local observation. With full_map, the whole shared team map is
         appended as MAP_CHANNELS flattened g x g channels."""
         sc = self.scenario
@@ -501,6 +541,11 @@ class GridSearchEnv(ParallelEnv):
                 parts.append(np.array([(gx - x) / g, (gy - y) / g, 1.0]))
             else:
                 parts.append(np.zeros(GUIDE_DIM))
+        if self.team if team is None else team:
+            trail, intent = self.team_maps(a)
+            parts += [self._patch(trail, x, y, 0.0), self._patch(intent, x, y, 0.0),
+                      np.clip(self._coarse(mates, np.sum), 0.0, 5.0),
+                      self._coarse(trail, np.mean), self._coarse(intent, np.mean)]
         if self.full_map if full_map is None else full_map:
             me = np.zeros((g, g))
             me[y, x] = 1.0

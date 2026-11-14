@@ -494,3 +494,29 @@ def test_imitation_collect_and_fit():
     assert 0.0 <= acc <= 1.0
     O2, _, A2, _ = collect(sampler, 1, seed=1, net=net, beta=0.0, workers=1)
     assert len(O2) == len(A2) > 0
+
+
+def test_team_layers():
+    from swarmsearch.env import TEAM_DIM, obs_dim
+    from swarmsearch.scenario import Scenario
+    env = GridSearchEnv(Scenario(n_drones=4), seed=0, team=True)
+    env.reset(seed=0)
+    a, b = env.agents[0], env.agents[1]
+    assert env._obs(a).shape == (obs_dim() + TEAM_DIM,)
+    assert env._obs(a, team=False).shape == (obs_dim(),)
+    # b flies east for 6 steps: its trail fades behind it, intent points east.
+    env.pos[b] = np.array([5, 10])
+    env.history[b] = [env.pos[b].copy()]
+    for _ in range(6):
+        acts = {x: 8 for x in env.agents}
+        env.pos[b] = env.pos[b] + [1, 0]
+        env.t += 1
+        env.trail_t[b][env.pos[b][1], env.pos[b][0]] = env.t
+        env.history[b] = (env.history[b] + [env.pos[b].copy()])[-6:]
+    trail, intent = env.team_maps(a)
+    assert trail[10, 11] == 1.0 and 0 < trail[10, 6] < trail[10, 10] < 1.0
+    assert intent[10, 12] == 1.0 and intent[10, 16] > 0 and intent[10, 17] == 0
+    assert env.team_maps(b)[0][10, 11] < 1.0  # own trail excluded
+    for _ in range(3):
+        env.step({x: 8 for x in env.agents})
+    assert np.isfinite(env._obs(a)).all()

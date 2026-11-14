@@ -33,17 +33,19 @@ def main():
     p.add_argument("--epochs", type=int, default=4)
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--team", action="store_true",
+                   help="team layers in the observation (all teammates' positions, trails, intent)")
     p.add_argument("--out", default="models/bc_greedy.pt")
     a = p.parse_args()
 
     torch.manual_seed(a.seed)
     sampler = ScenarioSampler(obstacle_frac=(0.0, a.obstacles))
-    cfg = Config(sampler=sampler, seed=a.seed, out_dir=str(Path(a.out).parent))
-    net = ActorCritic(sampler.grid_size, True, cfg.hidden)
+    cfg = Config(sampler=sampler, seed=a.seed, out_dir=str(Path(a.out).parent), team=a.team)
+    net = ActorCritic(sampler.grid_size, True, cfg.hidden, team=a.team)
     data = None
     t0 = time.time()
     for r, beta in enumerate(a.betas):
-        O, M, A, ms = collect(sampler, a.episodes, a.seed * 100 + r, None if r == 0 else net, beta, a.workers)
+        O, M, A, ms = collect(sampler, a.episodes, a.seed * 100 + r, None if r == 0 else net, beta, a.workers, a.team)
         ft = np.mean([m["find_time_frac"] for m in ms])
         print(f"round {r} beta {beta}: {len(A)} samples, rollout find time {ft:.0%} of budget, "
               f"found {np.mean([m['found_frac'] for m in ms]):.0%} ({time.time() - t0:.0f}s)", flush=True)
@@ -52,7 +54,7 @@ def main():
         print(f"round {r}: fit on {len(data[2])} samples, accuracy {acc:.1%}", flush=True)
         save(net, cfg, Path(a.out))
     # Last check: the clone alone.
-    _, _, _, ms = collect(sampler, a.episodes // 2, a.seed * 100 + 99, net, 0.0, a.workers)
+    _, _, _, ms = collect(sampler, a.episodes // 2, a.seed * 100 + 99, net, 0.0, a.workers, a.team)
     print(f"clone alone: find time {np.mean([m['find_time_frac'] for m in ms]):.0%} of budget, "
           f"found {np.mean([m['found_frac'] for m in ms]):.0%}", flush=True)
 

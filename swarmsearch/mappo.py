@@ -28,7 +28,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .env import GUIDE_DIM, MAP_CHANNELS, MAX_DRONES, N_ACTIONS, GridSearchEnv, map_dim, obs_dim, state_dim
+from .env import GUIDE_DIM, TEAM_DIM, MAP_CHANNELS, MAX_DRONES, N_ACTIONS, GridSearchEnv, map_dim, obs_dim, state_dim
 from .guide import apply_plans, make_guide
 from .lookahead import path_value
 from .scenario import ScenarioSampler
@@ -119,13 +119,14 @@ def make_body(arch: str, grid_size: int, out: int, hidden: int, tf: dict | None 
 
 class ActorCritic(nn.Module):
     def __init__(self, grid_size: int, centralized: bool, hidden: int = 256, arch: str = "mlp",
-                 tf: dict | None = None, guided: bool = False):
+                 tf: dict | None = None, guided: bool = False, team: bool = False):
         super().__init__()
         self.centralized = centralized
         self.arch = arch
         self.full_map = arch != "mlp"
         self.guided = guided
-        o = self.vec = obs_dim() + (GUIDE_DIM if guided else 0)
+        self.team = team
+        o = self.vec = obs_dim() + (GUIDE_DIM if guided else 0) + (TEAM_DIM if team else 0)
         self.actor = make_body(arch, grid_size, N_ACTIONS, hidden, tf, o)
         # MAPPO's critic gets the full global state plus the vector obs; IPPO's sees only the local obs.
         self.critic = (mlp(o + state_dim(grid_size), 1, hidden) if centralized
@@ -174,6 +175,7 @@ class Config:
     bc_coef: float = 1.0
     bc_anneal: float = 0.5  # fraction of training over which bc_coef fades to 0
     critic_warmup: int = 0  # updates with the actor frozen while the critic learns
+    team: bool = False  # team layers in the observation (all teammates' positions, trails, intent)
     out_dir: str = "runs/mappo"
     sampler: ScenarioSampler = field(default_factory=ScenarioSampler)
 
@@ -198,11 +200,11 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     guide = make_guide(cfg.guide)
     guided = guide is not None
     envs = [GridSearchEnv(sampler=cfg.sampler, seed=int(rng.integers(1 << 31)), full_map=cfg.arch != "mlp",
-                         guided=guided)
+                         guided=guided, team=cfg.team)
             for _ in range(cfg.n_envs)]
     g = envs[0].grid_size
     dev = torch.device(cfg.device)
-    net = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided).to(dev)
+    net = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided, cfg.team).to(dev)
     vec = net.vec
     T_ = lambda a: torch.from_numpy(a).to(dev)
     if cfg.init_from:
@@ -211,7 +213,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
     anchor = None
     if cfg.bc_anchor:
-        anchor = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided).to(dev)
+        anchor = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided, cfg.team).to(dev)
         anchor.load_state_dict(torch.load(cfg.bc_anchor, weights_only=False, map_location="cpu")["state_dict"])
         anchor.eval()
 
@@ -398,7 +400,8 @@ def load(path: str | Path) -> tuple[ActorCritic, dict]:
     cfg = ck["config"]
     arch = cfg.get("arch") or ("cnn" if cfg.get("full_map") else "mlp")
     guided = cfg.get("guide", "none") not in (None, "none")
-    net = ActorCritic(cfg["sampler"]["grid_size"], cfg["algo"] == "mappo", cfg["hidden"], arch, tf_kwargs(cfg), guided)
+    net = ActorCritic(cfg["sampler"]["grid_size"], cfg["algo"] == "mappo", cfg["hidden"], arch, tf_kwargs(cfg), guided,
+                       cfg.get("team", False))
     net.load_state_dict(ck["state_dict"])
     net.eval()
     return net, cfg
@@ -438,7 +441,7 @@ class LearnedPolicy:
             return {}
         if self.guide is not None and env.t % self.guide_every == 0:
             apply_plans([env], self.guide.plan([env]))
-        o = torch.from_numpy(np.stack([env._obs(a, full_map=self.net.full_map, guided=self.net.guided)
+        o = torch.from_numpy(np.stack([env._obs(a, full_map=self.net.full_map, guided=self.net.guided, team=self.net.team)
                                        for a in agents]))
         m = torch.from_numpy(np.stack([env.action_mask(a) for a in agents]).astype(np.float32))
         with torch.no_grad():
