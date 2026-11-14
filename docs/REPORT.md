@@ -193,14 +193,40 @@ map already shows where everyone has searched. Memory helps a little because it
 lets a drone stick to a plan. The bottleneck is what the drones can know, not
 how the policy is trained.
 
+### 4.5 Videos
+
+**2D: one mission, eight methods.**
+[`results/figures/all_models.mp4`](../results/figures/all_models.mp4) (27 s).
+Twenty percent of the area is blocked, and survivors walk toward a safe point
+the drones are not told about. Each panel shows the team's probability map as
+heat, drones with their last 12 moves, and survivors (hollow = not yet found,
+filled = found). On this mission: lawnmower 5/10 found, belief-greedy 10/10,
+MAPPO M1 8/10, MAPPO M2 10/10. A single mission is noisy; §4.1 has the averages.
+
+![Frame from the 2D comparison video](../results/figures/all_models_frame.png)
+
+**3D: the same kind of mission flown in PyBullet.**
+[`results/figures/flight_3d.mp4`](../results/figures/flight_3d.mp4).
+MAPPO M2 on an M4 mission (buildings taller than the drones, no diagonal
+moves past corners), flown by Crazyflie quadrotors under PID control. Left:
+PyBullet's own rendering, with a coloured marker on each drone (a Crazyflie
+is 10 cm across) and survivors on the ground (red = not found, green =
+found). Right: the team's map at the same moment.
+
+![Frame from the 3D flight video](../results/figures/flight_3d_frame.png)
+
+Both videos are rebuilt with `scripts/render_video.py` and
+`scripts/render_video_3d.py`.
+
 ## 5. Limitations
 
 - **Coverage problems.** Still survivors with no prior: no method beats a
   sweep (§4.1).
 - **Communication.** The map is assumed to be shared perfectly and instantly
   between all drones. Real radios have limited range and bandwidth.
-- **Sensing.** The camera sees only the cell directly below, with a fixed
-  detection probability, and nothing blocks its view.
+- **Sensing.** In the results above the camera sees only the cell directly
+  below, with a fixed detection probability, and nothing blocks its view. The
+  camera mode in §6.1 removes this, but no policy is trained on it yet.
 - **Flight.** 3D flight uses a PID controller tuned for calm-to-moderate wind,
   and the 3D results come from small samples.
 - **Compute.** All training ran on 4 CPU cores, so each model got 2M steps and
@@ -212,20 +238,77 @@ how the policy is trained.
   range, or every few steps. The rule depends on a shared map, so this is
   where learned coordination could beat it.
 - **Battery and return-to-base**, so missions involve planning recharges.
-- **Camera with occlusion**: buildings and trees block the view, as in the
-  original M5 stretch goal.
+- **Camera view environment (M6, built; training paused).** Section 6.1.
 - **An RL flight controller** to replace PID, for stronger wind.
 - **Recurrent PPO** with the GRU actor, if the problem changes enough that
   memory matters.
 
+### 6.1 Camera view environment
+
+The search so far assumes a camera that sees exactly the cell below with a
+fixed detection chance. A real search drone faces five problems that this
+hides. They are now built into the environment as an optional camera mode
+(`Scenario(camera=True)`, `scripts/train.py --camera`; code in
+`swarmsearch/camera.py`):
+
+| Effect | How it is modelled |
+|---|---|
+| Altitude trade-off | Two new actions, climb and descend. Low (15 m) sees 1 cell, mid (35 m) 3×3, high (60 m) 5×5. Detection drops with height (×1.0, ×0.7, ×0.45) and a further 15% per ring away from the footprint centre. |
+| Line of sight | Buildings get heights of 10–50 m. A footprint cell counts only if the sight line from the camera to the ground clears every building it crosses. With 25% buildings, about 7% of outer cells seen from high are hidden. |
+| Partial cover | Ground is open, rubble (×0.6) or tree canopy (×0.3 by day, ×0.5 with thermal). The cover map is known, as from satellite imagery. |
+| False alarms | From mid or high, a detection is only a candidate, and false alarms happen (more over rubble and foliage). The team cannot tell them apart until a drone checks from low, which confirms the find. Candidates fade after 40 steps. |
+| Light and sensor | Day or dusk with an ordinary camera, night or midday with thermal. Each scales detection (×0.6–1.0) and false alarms (×0.5–2.5). |
+
+The probability map follows the sensor. Every footprint cell in sight is
+updated with its own detection chance. A cell where a candidate was reported
+is left unchanged, because a report could be a false alarm.
+
+**Baselines in camera mode.**
+- The lawnmower sweeps at mid altitude in lanes 3 rows apart and detours to
+  confirm any candidate within 6 cells: the standard "sweep, then
+  investigate" procedure.
+- The belief-greedy rule picks an altitude as well as a target, by expected
+  detections over the footprint per step of travel and altitude change, and
+  confirms nearby candidates.
+
+Missions last 100 steps, because a footprint three cells wide covers ground
+about three times faster. In a first check (30 random camera missions with
+0–30% buildings), the sweep found 67% of survivors and the rule 81%. The rule
+chose high altitude 58% of the time. These numbers are preliminary.
+
+![The camera environment: sweep and rule on the same mission](../results/figures/camera_frame.png)
+
+*Video: [`results/figures/camera_baselines.mp4`](../results/figures/camera_baselines.mp4).
+Bigger squares fly higher, outlines are camera footprints, diamonds are
+unconfirmed detections, green is tree canopy, grey dots are rubble, and
+darker buildings are taller.*
+
+**First training attempt.** The first MAPPO run collapsed into reward
+hacking. The drones stayed high and collected the reward for clearing empty
+cells over the wide footprint, reaching 95% coverage while finding 0%,
+because they never descended to confirm. Ground cleared from mid or high now
+pays a quarter as much as a low pass. After that change the restarted run
+found 40–70% of survivors within its first 80 updates. Training is paused at
+update 79 of 1953 (about 4 hours of CPU for the full 2M steps).
+
+**Why it matters for the RL question.** Here the right move depends on several
+steps ahead: climb to scan, spot, descend, confirm, and choose viewpoints
+around buildings. That is where a one-target-ahead rule should struggle and a
+learned policy could pull ahead. The next steps are to finish training,
+evaluate on the nine `cam_*` conditions in `swarmsearch/evaluate.py` (100
+missions each), and fly the camera policy in 3D with altitude layers.
+
 ## 7. Reproducing
 
 ```bash
-pip install -r requirements.txt && python -m pytest          # 46 tests
+pip install -r requirements.txt && python -m pytest          # 53 tests
 python scripts/train.py --algo mappo --steps 2000000 --out runs/m1
 python scripts/train.py --algo mappo --obstacles 0.3 --init runs/m1/model.pt --out runs/m2
 python scripts/evaluate.py --models models/m2_2m.pt --m5 --episodes 100 --out results/m5
 python scripts/run3d.py --model models/m2_2m.pt --backend pybullet --episodes 20   # needs requirements-3d.txt
 python scripts/imitate.py --obstacles 0.3 --out models/bc_greedy.pt               # imitation (§4.4)
 python scripts/make_figures.py                                                    # figures in results/figures/
+python scripts/render_video.py --condition obs20_to_safety_unknown --seed 1        # 2D video
+~/venv3d/bin/python scripts/render_video_3d.py --condition m4_to_safety_unknown    # 3D video (PyBullet)
+python scripts/train.py --camera --obstacles 0.3 --out runs/cam                    # camera mode (§6.1)
 ```
