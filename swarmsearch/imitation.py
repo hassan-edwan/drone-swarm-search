@@ -35,7 +35,7 @@ def _rollouts(args) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict]]:
     env = GridSearchEnv(sampler=sampler, seed=seed, team=team)
     net = None
     if state_dict is not None:
-        net = ActorCritic(sampler.grid_size, True, team=team)
+        net = ActorCritic(sampler.grid_size, True, team=team, camera=sampler.camera)
         net.load_state_dict(state_dict)
         net.eval()
     O, M, A, metrics = [], [], [], []

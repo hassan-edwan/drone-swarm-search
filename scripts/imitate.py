@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from swarmsearch.imitation import collect, fit  # noqa: E402
 from swarmsearch.mappo import ActorCritic, Config, save  # noqa: E402
-from swarmsearch.scenario import ScenarioSampler  # noqa: E402
+from swarmsearch.scenario import CAMERA_STEPS, ScenarioSampler  # noqa: E402
 
 
 def main():
@@ -35,13 +35,15 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--team", action="store_true",
                    help="team layers in the observation (all teammates' positions, trails, intent)")
+    p.add_argument("--camera", action="store_true", help="M6 camera mode (100-step missions)")
     p.add_argument("--out", default="models/bc_greedy.pt")
     a = p.parse_args()
 
     torch.manual_seed(a.seed)
-    sampler = ScenarioSampler(obstacle_frac=(0.0, a.obstacles))
+    sampler = ScenarioSampler(obstacle_frac=(0.0, a.obstacles), camera=a.camera,
+                              max_steps=CAMERA_STEPS if a.camera else 200)
     cfg = Config(sampler=sampler, seed=a.seed, out_dir=str(Path(a.out).parent), team=a.team)
-    net = ActorCritic(sampler.grid_size, True, cfg.hidden, team=a.team)
+    net = ActorCritic(sampler.grid_size, True, cfg.hidden, team=a.team, camera=a.camera)
     data = None
     t0 = time.time()
     for r, beta in enumerate(a.betas):

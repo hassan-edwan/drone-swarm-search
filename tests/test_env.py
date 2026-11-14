@@ -628,3 +628,15 @@ def test_camera_training_smoke(tmp_path):
     env = GridSearchEnv(Scenario(camera=True), seed=0)
     m = run_episode(env, LearnedPolicy(net2), CAMERA_CONDITIONS["cam_open_wander"](0), 0)
     assert 0.0 <= m["found_frac"] <= 1.0
+
+
+def test_camera_imitation_runs():
+    from swarmsearch.imitation import collect, fit
+    from swarmsearch.mappo import ActorCritic
+    s = ScenarioSampler(camera=True, max_steps=15)
+    O, M, A, ms = collect(s, 2, 0, None, 1.0, workers=1)
+    assert M.shape[1] == 11 and A.max() <= 10
+    net = ActorCritic(20, True, camera=True)
+    assert 0.0 <= fit(net, O, M, A, epochs=1, log=lambda *_: None) <= 1.0
+    O2, _, _, _ = collect(s, 2, 1, net, 0.0, workers=1)
+    assert O2.shape[1] == O.shape[1]
