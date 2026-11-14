@@ -43,6 +43,7 @@ N_ACTIONS = len(MOVES)
 CLIMB, DESCEND = 9, 10
 N_ACTIONS_CAMERA = 11
 CAND_TTL = 40  # steps an unconfirmed detection stays on the map
+INFO_WEIGHT_HIGH = 0.25  # reward weight for ground cleared from mid/high (not confirmable)
 
 REWARD_DETECT = 1.0  # x detected belief mass, scaled so a fresh uniform cell pays ~detection_prob
 REWARD_SURVIVOR = 10.0
@@ -465,7 +466,10 @@ class GridSearchEnv(ParallelEnv):
                 detected = self.belief[cy, cx] * p
                 self._B[:, cy, cx] *= 1.0 - p
                 self.belief[cy, cx] -= detected
-                reward += REWARD_DETECT * detected * self.n_free
+                # Only a low pass can turn this into a find; clearing ground
+                # from higher up is worth less, or drones learn to farm it
+                # from high altitude and never come down to confirm.
+                reward += REWARD_DETECT * detected * self.n_free * (1.0 if alt == 0 else INFO_WEIGHT_HIGH)
         return reward, found
 
     def candidates(self) -> np.ndarray:
