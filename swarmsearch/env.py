@@ -49,6 +49,12 @@ REWARD_DETECT = 1.0  # x detected belief mass, scaled so a fresh uniform cell pa
 REWARD_SURVIVOR = 10.0
 PENALTY_COLLISION = 10.0
 PENALTY_STEP = 0.01
+# reward="find_time": a find pays FIND_TIME_REWARD * (1 - t/T), so the summed
+# find reward is exactly N * (1 - mean find time / T), the evaluation metric.
+# Ground cleared pays CLEAR_WEIGHT at every altitude, a small dense signal
+# that no longer favours slow low passes.
+FIND_TIME_REWARD = 20.0
+CLEAR_WEIGHT = 0.25
 FRESH_REPEAT = 0.9  # searching a cell this fresh counts as a repeat (metric only)
 WEIGHT_FLOOR = 1e-4  # keeps every movement hypothesis recoverable
 
@@ -128,6 +134,7 @@ class GridSearchEnv(ParallelEnv):
         # before anyone moves. Active in training and deployment alike.
         self.shield = shield
         self.guide_coef = 0.0  # shaping weight, set (and annealed) by the trainer
+        self.reward = "count"  # "count" (+REWARD_SURVIVOR per find) or "find_time"; set by the trainer
         self.goals: dict[str, tuple[int, int]] = {}
         self._obs_dim = (obs_dim() + (GUIDE_DIM if guided else 0) + (TEAM_DIM if team else 0)
                          + (CAMERA_DIM if self.camera else 0) + (map_dim(grid) if full_map else 0))
@@ -314,10 +321,14 @@ class GridSearchEnv(ParallelEnv):
         for a in self.agents:
             if self.alive[a] and (searching is None or searching.get(a, True)):
                 r, f = self._search(a)
+                if self.reward == "find_time":
+                    r *= CLEAR_WEIGHT / (1.0 if not self.camera or self.alt[a] == 0 else INFO_WEIGHT_HIGH)
                 rewards[a] += r
                 found_now += f
+        per_find = (FIND_TIME_REWARD * (1.0 - self.t / sc.max_steps) if self.reward == "find_time"
+                    else REWARD_SURVIVOR)
         for a in self.agents:
-            rewards[a] += REWARD_SURVIVOR * found_now
+            rewards[a] += per_find * found_now
         self._move_survivors()
         self._spread_belief()
 

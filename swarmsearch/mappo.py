@@ -178,6 +178,7 @@ class Config:
     bc_coef: float = 1.0
     bc_anneal: float = 0.5  # fraction of training over which bc_coef fades to 0
     critic_warmup: int = 0  # updates with the actor frozen while the critic learns
+    reward: str = "count"  # "count" or "find_time" (see env.FIND_TIME_REWARD)
     team: bool = False  # team layers in the observation (all teammates' positions, trails, intent)
     out_dir: str = "runs/mappo"
     sampler: ScenarioSampler = field(default_factory=ScenarioSampler)
@@ -205,6 +206,8 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     envs = [GridSearchEnv(sampler=cfg.sampler, seed=int(rng.integers(1 << 31)), full_map=cfg.arch != "mlp",
                          guided=guided, team=cfg.team)
             for _ in range(cfg.n_envs)]
+    for e in envs:
+        e.reward = cfg.reward
     g = envs[0].grid_size
     dev = torch.device(cfg.device)
     camera = cfg.sampler.camera

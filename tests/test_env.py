@@ -640,3 +640,28 @@ def test_camera_imitation_runs():
     assert 0.0 <= fit(net, O, M, A, epochs=1, log=lambda *_: None) <= 1.0
     O2, _, _, _ = collect(s, 2, 1, net, 0.0, workers=1)
     assert O2.shape[1] == O.shape[1]
+
+
+def test_find_time_reward_sums_to_the_metric():
+    """With reward="find_time" and no clearing, the find reward per drone equals
+    N * (1 - find_time / T) * FIND_TIME_REWARD: maximising it minimises the metric."""
+    from swarmsearch import env as E
+    from swarmsearch.baselines import BeliefGreedy
+    for camera in (False, True):
+        sc = Scenario(grid_size=10, n_drones=2, n_survivors=4, max_steps=60, camera=camera)
+        env = GridSearchEnv(sc)
+        env.reset(seed=3, options={"scenario": sc})
+        env.reward = "find_time"
+        old = E.CLEAR_WEIGHT, E.PENALTY_STEP
+        E.CLEAR_WEIGHT, E.PENALTY_STEP = 0.0, 0.0
+        try:
+            pol = BeliefGreedy()
+            pol.reset(env)
+            total = 0.0
+            while env.agents:
+                total += env.step(pol.act(env))[1]["drone_0"]
+        finally:
+            E.CLEAR_WEIGHT, E.PENALTY_STEP = old
+        m = env.metrics()
+        assert m["found_frac"] > 0
+        assert total == pytest.approx(E.FIND_TIME_REWARD * 4 * (1 - m["find_time"] / 60))
