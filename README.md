@@ -7,28 +7,43 @@ split the area when they don't, re-check where survivors may have moved, and
 cover for a lost drone. The goal is to find 90% of survivors faster than a
 fixed lawnmower sweep.
 
+**Results and findings: [docs/REPORT.md](docs/REPORT.md).** In short: the
+shared probability map lets the swarm find survivors up to twice as fast as a
+lawnmower sweep when survivors move predictably, the learned policy matches a
+strong hand-written rule built on the same map and generalises to larger grids
+and other team sizes, and the missions fly in 3D (PyBullet Crazyflies) with
+gusts up to about 2 m/s².
+
 ## Milestones
 
 | Step | Milestone | Status |
 |---|---|---|
-| M1 | 2D grid search env, lawnmower and random baselines, MAPPO and IPPO | **In progress** (env, baselines, trainer, evaluation done; training runs next) |
-| M2 | 2D grid with obstacles | Set up: block layouts, path-following survivors, `--m2` test conditions; not trained yet |
-| M3 | 3D in gym-pybullet-drones, policy waypoints flown by PID | Running (`scripts/run3d.py`); PyBullet needs Python ≤ 3.12 |
-| M4 | 3D with obstacles | Set up (`run3d.py --m4`): buildings taller than the drones, flown round |
-| M5 | 3D camera with visual blockers | Stretch |
-| M6 | RL flight policy replaces PID | After the course |
+| M1 | 2D grid search env, lawnmower and random baselines, MAPPO and IPPO; moving survivors, online movement inference, safety shield | Done (`models/m1_infer_2m.pt`) |
+| M2 | 2D grid with obstacles | Done (`models/m2_2m.pt`, fine-tuned from M1) |
+| M3 | 3D in gym-pybullet-drones, policy waypoints flown by PID; wind | Done (`results/m3`) |
+| M4 | 3D with buildings flown round | Done (`results/m4`) |
+| M5 | Generality and search speed: find-time metric, belief-greedy baseline, larger grids and other team sizes, imitation + RL, team layers, memory | Done (`results/m5`, report §4.2, §4.4) |
+| — | 3D camera with visual blockers; limited communication; RL flight controller | Future work |
 
 ## Layout
 
 ```
 swarmsearch/
   scenario.py   scenario variables, movement profiles, random sampler
-  env.py        2D grid search env (PettingZoo ParallelEnv)
-  baselines.py  lawnmower sweep and random walk
+  env.py        2D grid search env (PettingZoo ParallelEnv), shared belief map, shield
+  belief.py     movement hypotheses for online inference
+  obstacles.py  obstacle layouts (M2, M4)
+  baselines.py  lawnmower sweep, random walk, belief-greedy rule
   mappo.py      shared-actor PPO with centralized (MAPPO) or local (IPPO) critic
+  lookahead.py  run-time path lookahead on the belief map
+  guide.py      rule-based region guide (optional training aid)
+  imitation.py  behaviour cloning + DAgger of the belief-greedy rule
+  memory.py     the same with a GRU actor (memory check)
   evaluate.py   named test conditions and metrics
+  sim3d.py      3D flight (PyBullet or point-mass) of the 2D mission
 scripts/
-  train.py, evaluate.py, render_episode.py
+  train.py, evaluate.py, imitate.py, imitate_gru.py, run3d.py, render_episode.py, make_figures.py
+docs/REPORT.md  results and findings
 tests/
 ```
 
@@ -45,7 +60,7 @@ python -m pytest
 git clone https://github.com/hassan-edwan/drone-swarm-search && cd drone-swarm-search
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python -m pytest                                        # 11 tests, a few seconds
+python -m pytest                                        # 46 tests, about half a minute
 bash scripts/run_experiments.sh                         # MAPPO + IPPO, 2 seeds each, in parallel, then evaluation
 ```
 
@@ -117,7 +132,7 @@ ARGS="--guide heuristic" TAG=guided sbatch scripts/hpc/train.sbatch   # set --ac
 - **Obstacles (M2):** rectangles of 1–4 cells a side placed until the target fraction is covered (`obstacle_layout="scatter"` gives single cells). Enclosed pockets are filled in, so every open cell is reachable from the base. Survivors heading to safety take shortest paths around obstacles, and so do the movement hypotheses; drifting survivors pile up against them.
 - **Search:** the camera searches the cell under the drone and finds each survivor there with the detection probability.
 - **Reward (per drone):** the survivor probability mass its search detects (scaled so an unsearched cell with a uniform prior pays about the detection probability); +10 to every drone per survivor found by anyone; −0.01 per step. Collisions cannot happen (shield).
-- **Observation (per drone, 167 values):** 5 × 5 local patches of freshness, belief (expected survivors), obstacles and teammates; a coarse 5 × 5 summary of the whole map's freshness and belief (the shared team map); own position, battery, time; the two nearest teammates; the scenario profile.
+- **Observation (per drone, 167 values):** 5 × 5 local patches of freshness, belief (expected survivors), obstacles and teammates; a coarse 5 × 5 summary of the whole map's freshness and belief (the shared team map); own position, battery, time; the two nearest teammates; the scenario profile. `--team` adds 125 values: every teammate's position, fading trail and projected heading, drawn on the same local and coarse maps.
 - **Global state (critic only):** full maps, including true survivor positions, plus scenario info.
 - **Belief:** the expected undetected survivor mass per cell. It starts as the prior heat map, drops by the detection probability where a cell is searched, and each step moves with the movement model. Survivors move with the same model under the true profile, so with a known profile the belief is exact. Without a profile, the team keeps one belief map per movement hypothesis (still; wander and drift in 4 directions at 0.5/1.0/1.5 m/s; head to a safe point on a 10 × 10 lattice: 116 in all, `swarmsearch/belief.py`). Empty searches and finds reweight the hypotheses, the shared belief is their mixture, and the profile input is the posterior-expected profile, so the drones work out how survivors move during the search.
 - **Movement:** still; wander (random walk); drift (80% of moves one way, e.g. flood water); to_safety (80% of moves toward a safe point). Speed sets how often a survivor changes cell (1 m/s = 10% of steps).

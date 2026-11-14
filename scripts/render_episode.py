@@ -67,7 +67,7 @@ def main():
         ax.scatter([x], [y], s=70, facecolors="#15233B" if f else "none", edgecolors="#15233B", linewidths=2)
     m = env.metrics()
     t90 = m["time_to_90"] if m["time_to_90"] is not None else "not reached"
-    ax.set_title(f"{name} · {a.condition} · found {m['found_frac']:.0%} · t90 {t90} · {env.t} steps")
+    ax.set_title(f"{name} · {a.condition} · found {m['found_frac']:.0%} · t90 {t90} · {env.t} steps", fontsize=9)
     ax.set_xticks([]); ax.set_yticks([])
     ax.set_xlim(-0.5, g - 0.5); ax.set_ylim(g - 0.5, -0.5)
     fig.tight_layout()
