@@ -7,7 +7,7 @@ from dataclasses import replace
 import numpy as np
 
 from .env import GridSearchEnv
-from .scenario import DRIFT_DIRS, MovementProfile, Scenario, ScenarioSampler
+from .scenario import CAMERA_STEPS, DRIFT_DIRS, MovementProfile, Scenario, ScenarioSampler
 
 # Named test conditions. Each is a function seed -> Scenario so that every
 # method sees exactly the same missions.
@@ -92,7 +92,26 @@ M5_CONDITIONS = {
     "2_drones_drift_unknown": _scaled("drift", 1.0, False, n_drones=2),
     "6_drones_drift_unknown": _scaled("drift", 1.0, False, n_drones=6),
 }
-ALL_CONDITIONS = {**CONDITIONS, **SPEED_SWEEP, **M2_CONDITIONS, **M4_CONDITIONS, **M5_CONDITIONS}
+
+
+# M6: geometry-aware camera (altitude, line of sight, cover, false alarms,
+# light). 100-step missions on 20x20 (see scenario.CAMERA_STEPS).
+def _cam(kind: str, speed: float, known: bool, lighting: str = "day_rgb", cover: float = 0.0, **kw):
+    return _mv(kind, speed, known, camera=True, lighting=lighting, cover_frac=cover, max_steps=CAMERA_STEPS, **kw)
+
+
+CAMERA_CONDITIONS = {
+    "cam_open_wander": _cam("wander", 1.0, False),
+    "cam_canopy_wander": _cam("wander", 1.0, False, cover=0.4),
+    "cam_city_drift_unknown": _cam("drift", 1.0, False, cover=0.2, obstacle_frac=0.2),
+    "cam_city_to_safety_unknown": _cam("to_safety", 1.0, False, cover=0.2, obstacle_frac=0.2),
+    "cam_dusk_city_wander": _cam("wander", 1.0, False, lighting="dusk_rgb", cover=0.3, obstacle_frac=0.2),
+    "cam_night_thermal": _cam("to_safety", 1.0, False, lighting="night_thermal", cover=0.3, obstacle_frac=0.2),
+    "cam_midday_thermal": _cam("drift", 1.0, False, lighting="midday_thermal", cover=0.2, obstacle_frac=0.1),
+    "cam_zones_still": _cam("still", 0.0, True, cover=0.3, n_zones=3),
+    "cam_random_mix": _sampled(obstacle_frac=(0.0, 0.3), camera=True, max_steps=CAMERA_STEPS),
+}
+ALL_CONDITIONS = {**CONDITIONS, **SPEED_SWEEP, **M2_CONDITIONS, **M4_CONDITIONS, **M5_CONDITIONS, **CAMERA_CONDITIONS}
 
 
 def run_episode(env: GridSearchEnv, policy, scenario: Scenario, seed: int) -> dict:
@@ -106,12 +125,13 @@ def run_episode(env: GridSearchEnv, policy, scenario: Scenario, seed: int) -> di
 def evaluate(policies: dict, conditions: dict | None = None, n_episodes: int = 50, grid_size: int = 20):
     """Returns {condition: {method: summary}}."""
     conditions = conditions or CONDITIONS
-    envs: dict[int, GridSearchEnv] = {}
+    envs: dict[tuple[int, bool], GridSearchEnv] = {}
     results = {}
     for cname, make in conditions.items():
         results[cname] = {}
-        g = make(0).grid_size
-        env = envs.setdefault(g, GridSearchEnv(Scenario(grid_size=g)))
+        sc0 = make(0)
+        g = sc0.grid_size
+        env = envs.setdefault((g, sc0.camera), GridSearchEnv(Scenario(grid_size=g, camera=sc0.camera)))
         for pname, policy in policies.items():
             rows = [run_episode(env, policy, make(s), seed=s) for s in range(n_episodes)]
             results[cname][pname] = summarise(rows, rows and make(0).max_steps)
@@ -133,19 +153,22 @@ def summarise(rows: list[dict], max_steps: int) -> dict:
         "repeat_frac": float(np.mean([r["repeat_frac"] for r in rows])),
         "collisions": float(np.mean([r["collisions"] for r in rows])),
         "shield": float(np.mean([r.get("shield", 0) for r in rows])),
+        "alarms": float(np.mean([r.get("alarms", 0) for r in rows])),
+        "false_alarms": float(np.mean([r.get("false_alarms", 0) for r in rows])),
     }
 
 
 def to_markdown(results: dict) -> str:
     lines = ["| Condition | Method | Mean find time (steps) | Find time (% of budget) | Time to 90% (steps) | "
-             "Reached 90% | Found | Coverage | Repeats | Collisions | Shield stops |",
-             "|---|---|---|---|---|---|---|---|---|---|---|"]
+             "Reached 90% | Found | Coverage | Repeats | Collisions | Shield stops | Alarms (false) |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for cname, per in results.items():
         for pname, s in per.items():
             lines.append(
                 f"| {cname} | {pname} | {s['find_time']:.0f} ± {s['find_time_se']:.0f} | {s['find_time_frac']:.0%} | "
                 f"{s['time_to_90']:.0f} ± {s['time_to_90_std']:.0f} | "
                 f"{s['reached_90']:.0%} | {s['found_frac']:.0%} | {s['coverage']:.0%} | "
-                f"{s['repeat_frac']:.0%} | {s['collisions']:.1f} | {s.get('shield', 0):.1f} |"
+                f"{s['repeat_frac']:.0%} | {s['collisions']:.1f} | {s.get('shield', 0):.1f} | "
+                f"{s.get('alarms', 0):.1f} ({s.get('false_alarms', 0):.1f}) |"
             )
     return "\n".join(lines)

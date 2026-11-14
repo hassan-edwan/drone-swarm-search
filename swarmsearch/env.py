@@ -27,6 +27,7 @@ from gymnasium import spaces
 from pettingzoo import ParallelEnv
 
 from . import belief as _belief
+from . import camera as cam
 from .belief import DIRECTED, move_weights, propagate
 from .obstacles import distance_fields, make_obstacles
 from .scenario import PROFILE_DIM, Scenario, ScenarioSampler
@@ -38,6 +39,10 @@ MOVES = np.array(
 )
 HOVER = 8
 N_ACTIONS = len(MOVES)
+# Camera mode (M6) adds two actions: change altitude by one level, staying in the cell.
+CLIMB, DESCEND = 9, 10
+N_ACTIONS_CAMERA = 11
+CAND_TTL = 40  # steps an unconfirmed detection stays on the map
 
 REWARD_DETECT = 1.0  # x detected belief mass, scaled so a fresh uniform cell pays ~detection_prob
 REWARD_SURVIVOR = 10.0
@@ -61,6 +66,11 @@ HEADING_WINDOW = 5  # heading = mean move over the last few steps
 INTENT_STEPS = 5
 TEAM_DIM = 2 * (2 * PATCH_RADIUS + 1) ** 2 + 3 * COARSE * COARSE
 
+# Camera mode observation extras: own altitude (one-hot), light/sensor,
+# local patches of cover, building height and candidate detections, coarse
+# candidates, expected detections here at each altitude, nearest teammates' altitude.
+CAMERA_DIM = cam.N_ALT + 3 + 3 * (2 * PATCH_RADIUS + 1) ** 2 + COARSE * COARSE + cam.N_ALT + N_TEAMMATES
+
 # Guidance input (optional): direction to the guide's target cell + "has target".
 GUIDE_DIM = 3
 GUIDE_GAMMA = 0.99  # discount used in the potential-based shaping bonus
@@ -75,8 +85,12 @@ def map_dim(grid_size: int) -> int:
     return MAP_CHANNELS * grid_size * grid_size
 
 
-def state_dim(grid_size: int) -> int:
-    return 5 * grid_size * grid_size + 4 + PROFILE_DIM
+def state_dim(grid_size: int, camera: bool = False) -> int:
+    return 5 * grid_size * grid_size + 4 + PROFILE_DIM + ((3 * grid_size * grid_size + 3) if camera else 0)
+
+
+def n_actions(camera: bool = False) -> int:
+    return N_ACTIONS_CAMERA if camera else N_ACTIONS
 
 
 _W_CACHE: dict = {}
@@ -107,14 +121,16 @@ class GridSearchEnv(ParallelEnv):
         self.full_map = full_map
         self.guided = guided
         self.team = team
+        self.camera = bool((scenario or sampler).camera)
         # Safety shield: drones never move into a teammate's cell, and
         # simultaneous claims on one cell (or head-on swaps) are resolved
         # before anyone moves. Active in training and deployment alike.
         self.shield = shield
         self.guide_coef = 0.0  # shaping weight, set (and annealed) by the trainer
         self.goals: dict[str, tuple[int, int]] = {}
-        self._obs_dim = obs_dim() + (GUIDE_DIM if guided else 0) + (TEAM_DIM if team else 0) + (map_dim(grid) if full_map else 0)
-        self._state_dim = state_dim(grid)
+        self._obs_dim = (obs_dim() + (GUIDE_DIM if guided else 0) + (TEAM_DIM if team else 0)
+                         + (CAMERA_DIM if self.camera else 0) + (map_dim(grid) if full_map else 0))
+        self._state_dim = state_dim(grid, self.camera)
         self.agents: list[str] = []
 
     @functools.lru_cache(maxsize=None)
@@ -123,7 +139,7 @@ class GridSearchEnv(ParallelEnv):
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
-        return spaces.Discrete(N_ACTIONS)
+        return spaces.Discrete(n_actions(self.camera))
 
     # ------------------------------------------------------------------ reset
     def reset(self, seed=None, options=None):
@@ -133,6 +149,8 @@ class GridSearchEnv(ParallelEnv):
         sc = options.get("scenario") or self.fixed_scenario or self.sampler.sample(self.rng)
         if sc.grid_size != self.grid_size:
             raise ValueError("scenario grid_size must match the env")
+        if sc.camera != self.camera:
+            raise ValueError("scenario camera mode must match the env")
         self.scenario = sc
         g = sc.grid_size
         rng = self.rng
@@ -150,6 +168,11 @@ class GridSearchEnv(ParallelEnv):
                                             corner_cut=sc.corner_cutting)
         self.free = ~self.obstacles
         self.n_free = int(self.free.sum())
+        if sc.camera:
+            self.heights = cam.make_heights(rng, self.obstacles)
+            self.cover = cam.make_cover(rng, self.free, sc.cover_frac)
+            self.P, self.FA = cam.tables(self.free, self.heights, self.cover, sc.detection_prob, sc.lighting)
+            self.cand_t = np.full((g, g), -1e9)  # time of the latest unconfirmed detection per cell
 
         self.prior, zone_mask = self._make_prior(sc)
         self.survivors = self._place_survivors(sc, zone_mask)
@@ -169,6 +192,7 @@ class GridSearchEnv(ParallelEnv):
         for a in self.agents:
             self.trail_t[a][self.pos[a][1], self.pos[a][0]] = 0
         self.battery = {a: 1.0 for a in self.agents}
+        self.alt = {a: cam.START_ALT for a in self.agents}
         self.fail_step = (
             int(rng.integers(sc.max_steps // 4, 3 * sc.max_steps // 4)) if sc.drone_failure else -1
         )
@@ -178,6 +202,8 @@ class GridSearchEnv(ParallelEnv):
         self.n_repeats = 0
         self.n_collisions = 0
         self.n_shield = 0
+        self.n_alarms = 0  # candidates reported (camera mode)
+        self.n_false_alarms = 0
         # Survivors move with the true model; the belief with the hypotheses.
         self._W_true_cum = np.cumsum(self._move_weights([sc.movement], DIRECTED)[0], axis=0)
         self.goals = {}
@@ -233,8 +259,8 @@ class GridSearchEnv(ParallelEnv):
         target = {}
         for a in live:
             act = int(actions.get(a, HOVER))
-            if not self.action_mask(a)[act]:
-                act = HOVER
+            if act >= N_ACTIONS or not self.action_mask(a)[act]:
+                act = HOVER  # altitude changes stay in the cell
             target[a] = self.pos[a] + MOVES[act]
         if self.shield:
             n = self.n_shield
@@ -253,6 +279,11 @@ class GridSearchEnv(ParallelEnv):
         phi0 = {a: self._potential(a) for a in self.agents} if self.guide_coef else {}
 
         live = [a for a in self.agents if self.alive[a]]
+        if self.camera:
+            for a in live:
+                act = int(actions.get(a, HOVER))
+                if act in (CLIMB, DESCEND) and self.action_mask(a)[act]:
+                    self.alt[a] += 1 if act == CLIMB else -1
         target = self.targets(actions, count=True)
         for a in live:
             self.battery[a] = max(0.0, 1.0 - self.t / sc.max_steps)
@@ -358,6 +389,8 @@ class GridSearchEnv(ParallelEnv):
         return np.exp(-age * self._decay)
 
     def _search(self, a) -> tuple[float, int]:
+        if self.camera:
+            return self._search_camera(a)
         x, y = self.pos[a]
         self.n_visits += 1
         if self.freshness()[y, x] >= FRESH_REPEAT:
@@ -384,6 +417,60 @@ class GridSearchEnv(ParallelEnv):
         self.belief[y, x] -= detected
         reward = REWARD_DETECT * detected * self.n_free
         return reward, found
+
+    def _find(self, i: int, x: int, y: int):
+        self.found[i] = True
+        self.found_times.append(self.t)
+        if len(self._w) > 1:  # a find reweights the movement hypotheses by the mass they had here
+            self._w = self._w * (self._B[:, y, x] + 1e-12)
+            self._w = (1 - WEIGHT_FLOOR) * self._w / self._w.sum() + WEIGHT_FLOOR * self._w0
+            self._mix()
+
+    def _search_camera(self, a) -> tuple[float, int]:
+        """Camera search (M6). Every footprint cell in sight is looked at with
+        its own detection chance. From low altitude a detection is a confirmed
+        find. From higher up it is only a candidate on the map, and so is a
+        false alarm; the team cannot tell them apart until someone checks low.
+        A cell with no report counts as an empty search (belief scaled down);
+        a cell with a report is left as it was."""
+        x, y = (int(v) for v in self.pos[a])
+        alt = self.alt[a]
+        P, FA = self.P[alt, y, x], self.FA[alt, y, x]
+        g, r = self.grid_size, cam.R
+        self.n_visits += 1
+        if self.freshness()[y, x] >= FRESH_REPEAT and alt == 0:
+            self.n_repeats += 1
+        reward, found = 0.0, 0
+        for oy, ox in zip(*np.nonzero(P)):
+            cx, cy = x + ox - r, y + oy - r
+            p = P[oy, ox]
+            self.last_searched[cy, cx] = self.t
+            self.visited[cy, cx] = True
+            here = np.flatnonzero((~self.found) & (self.survivors[:, 0] == cx) & (self.survivors[:, 1] == cy))
+            seen = [i for i in here if self.rng.random() < p]
+            if alt == 0:
+                self.cand_t[cy, cx] = -1e9  # checked from low: resolved either way
+                for i in seen:
+                    self._find(i, cx, cy)
+                found += len(seen)
+                report = False
+            else:
+                false = self.rng.random() < FA[oy, ox]
+                report = bool(seen) or false
+                if report:
+                    self.cand_t[cy, cx] = self.t
+                    self.n_alarms += 1
+                    self.n_false_alarms += int(false and not seen)
+            if not report:
+                detected = self.belief[cy, cx] * p
+                self._B[:, cy, cx] *= 1.0 - p
+                self.belief[cy, cx] -= detected
+                reward += REWARD_DETECT * detected * self.n_free
+        return reward, found
+
+    def candidates(self) -> np.ndarray:
+        """(g, g) unconfirmed detections, 1 when new, fading to 0 after CAND_TTL steps."""
+        return np.clip(1.0 - (self.t - self.cand_t) / CAND_TTL, 0.0, 1.0)
 
     def _init_belief(self, sc: Scenario):
         if sc.profile_known:
@@ -460,6 +547,8 @@ class GridSearchEnv(ParallelEnv):
                     hit = (nxt[:, 0] == self.pos[b][0]) & (nxt[:, 1] == self.pos[b][1])
                     ok &= ~hit
         ok[HOVER] = True
+        if self.camera:
+            ok = np.concatenate([ok, [self.alt[a] < cam.N_ALT - 1, self.alt[a] > 0]])
         return ok.astype(np.int8)
 
     def _patch(self, grid: np.ndarray, x: int, y: int, fill: float) -> np.ndarray:
@@ -541,6 +630,20 @@ class GridSearchEnv(ParallelEnv):
                 parts.append(np.array([(gx - x) / g, (gy - y) / g, 1.0]))
             else:
                 parts.append(np.zeros(GUIDE_DIM))
+        if self.camera:
+            cand = self.candidates()
+            onehot = np.zeros(cam.N_ALT)
+            onehot[self.alt[a]] = 1.0
+            here = [cam.footprint_sum(self.belief, self.P[k])[y, x] * self.n_free for k in range(cam.N_ALT)]
+            mate_alt = np.zeros(N_TEAMMATES)
+            near = sorted(others, key=lambda b: abs(self.pos[b][0] - x) + abs(self.pos[b][1] - y))[:N_TEAMMATES]
+            for i, b in enumerate(near):
+                mate_alt[i] = (self.alt[b] + 1) / cam.N_ALT
+            cover_det = np.choose(self.cover, [1.0, cam.RUBBLE_DETECT, cam.LIGHTING[sc.lighting][2]])
+            parts += [onehot, cam.light_vector(sc.lighting),
+                      self._patch(cover_det, x, y, 1.0), self._patch(self.heights / cam.BUILDING_M[1], x, y, 0.0),
+                      self._patch(cand, x, y, 0.0), np.clip(self._coarse(cand, np.sum), 0.0, 5.0),
+                      np.clip(here, 0.0, 5.0), mate_alt]
         if self.team if team is None else team:
             trail, intent = self.team_maps(a)
             parts += [self._patch(trail, x, y, 0.0), self._patch(intent, x, y, 0.0),
@@ -567,6 +670,14 @@ class GridSearchEnv(ParallelEnv):
             if not f:
                 unfound[y, x] += 1.0
         found_frac = self.found.mean() if len(self.found) else 1.0
+        extra = []
+        if self.camera:
+            alt = np.zeros((g, g))
+            for a, alive in self.alive.items():
+                if alive:
+                    alt[self.pos[a][1], self.pos[a][0]] = (self.alt[a] + 1) / cam.N_ALT
+            cover_det = np.choose(self.cover, [1.0, cam.RUBBLE_DETECT, cam.LIGHTING[sc.lighting][2]])
+            extra = [cover_det.ravel(), self.candidates().ravel(), alt.ravel(), cam.light_vector(sc.lighting)]
         return np.concatenate(
             [
                 self.freshness().ravel(),
@@ -576,6 +687,7 @@ class GridSearchEnv(ParallelEnv):
                 unfound.ravel(),
                 [self.t / sc.max_steps, found_frac, sc.n_drones / MAX_DRONES, len(self.found) / 20],
                 sc.movement.as_vector(True, g),
+                *extra,
             ]
         ).astype(np.float32)
 
@@ -598,4 +710,6 @@ class GridSearchEnv(ParallelEnv):
             "collisions": self.n_collisions,
             "shield": self.n_shield,
             "steps": self.t,
+            "alarms": self.n_alarms,
+            "false_alarms": self.n_false_alarms,
         }

@@ -8,8 +8,31 @@ from __future__ import annotations
 
 import numpy as np
 
-from .env import HOVER, MOVES, GridSearchEnv
+from . import camera as cam
+from .env import CLIMB, DESCEND, HOVER, MOVES, GridSearchEnv
 from .obstacles import distance_fields
+
+CONFIRM_RANGE = 6  # camera mode: go check candidates at most this many steps away
+
+
+def _altitude_step(alt: int, want: int) -> int | None:
+    """Climb or descend toward `want`; None when already there."""
+    if alt == want:
+        return None
+    return CLIMB if want > alt else DESCEND
+
+
+def _toward(env, a, field, tiebreak=None) -> int:
+    """Move that most reduces `field` (a distance field), ties by higher tiebreak."""
+    mask = env.action_mask(a)
+    nxt = env.pos[a] + MOVES
+    best, best_key = HOVER, None
+    for m in np.flatnonzero(mask[:9]):
+        nx, ny = int(nxt[m, 0]), int(nxt[m, 1])
+        key = (field[ny, nx], 0.0 if tiebreak is None else -tiebreak[ny, nx])
+        if best_key is None or key < best_key:
+            best, best_key = int(m), key
+    return best
 
 
 def distance_field(free: np.ndarray, target: tuple[int, int], corner_cut: bool = True) -> np.ndarray:
@@ -37,14 +60,26 @@ class RandomWalk:
 class Lawnmower:
     """Split the rows evenly between drones; each sweeps its strip back and
     forth, then starts over. Ignores the heat map, the movement profile and
-    lost teammates, which is the point: it is the same plan in every scenario."""
+    lost teammates, which is the point: it is the same plan in every scenario.
+
+    Camera mode: sweep at mid altitude, whose 3-cell-wide footprint means one
+    lane every third row, and break off to check any candidate within
+    CONFIRM_RANGE (fly there, descend to low, climb back) before carrying on:
+    the standard "sweep, then investigate" procedure."""
+
+    SWEEP_ALT = 1
 
     def reset(self, env: GridSearchEnv):
         g = env.grid_size
         strips = np.array_split(np.arange(g), len(env.agents))
         self.routes = {}
+        self.tasks: dict[str, tuple[int, int]] = {}
         for a, rows in zip(env.agents, strips):
             route = []
+            if env.camera:  # lanes 3 rows apart, centred so every row is within one of a lane
+                rows = rows[1::3] if len(rows) > 1 else rows
+                if len(rows) and rows[-1] + 1 < (strips[env.agents.index(a)][-1]):
+                    rows = np.append(rows, strips[env.agents.index(a)][-1])
             for i, y in enumerate(rows):
                 xs = range(g) if i % 2 == 0 else range(g - 1, -1, -1)
                 route += [(x, int(y)) for x in xs if env.free[y, x]]
@@ -59,7 +94,14 @@ class Lawnmower:
 
     def act(self, env: GridSearchEnv) -> dict:
         out = {}
+        if env.camera:
+            out = self._confirm(env)
         for a in env.agents:
+            if a in out:
+                continue
+            if env.camera and (m := _altitude_step(env.alt[a], self.SWEEP_ALT)) is not None:
+                out[a] = m
+                continue
             route = self.routes[a]
             if not route:
                 out[a] = HOVER
@@ -97,6 +139,36 @@ class Lawnmower:
             out[a] = best
         return out
 
+    def _confirm(self, env) -> dict:
+        """Actions for drones busy checking a candidate (camera mode)."""
+        cand = env.candidates()
+        for a in list(self.tasks):  # done when the cell was checked from low, or the drone is gone
+            cx, cy = self.tasks[a]
+            if a not in env.agents or cand[cy, cx] == 0:
+                del self.tasks[a]
+        claimed = set(self.tasks.values())
+        open_c = [(int(x), int(y)) for y, x in zip(*np.nonzero(cand)) if (int(x), int(y)) not in claimed]
+        for a in env.agents:
+            if a in self.tasks or not open_c:
+                continue
+            x, y = (int(v) for v in env.pos[a])
+            near = [c for c in open_c if max(abs(c[0] - x), abs(c[1] - y)) <= CONFIRM_RANGE]
+            if near:
+                c = min(near, key=lambda c: max(abs(c[0] - x), abs(c[1] - y)))
+                self.tasks[a] = c
+                open_c.remove(c)
+        return _confirm_actions(env, self.tasks, self._field)
+
+
+def _confirm_actions(env, tasks, field_of) -> dict:
+    out = {}
+    for a, (cx, cy) in tasks.items():
+        if tuple(int(v) for v in env.pos[a]) == (cx, cy):
+            out[a] = _altitude_step(env.alt[a], 0) or HOVER
+        else:
+            out[a] = _toward(env, a, field_of(env, (cx, cy)))
+    return out
+
 
 class BeliefGreedy:
     """Hand-written use of the same belief map the learned policy sees: each
@@ -113,11 +185,21 @@ class BeliefGreedy:
 
     def reset(self, env: GridSearchEnv):
         self.targets: dict[str, tuple[tuple[int, int], float]] = {}
+        self.cam_targets: dict[str, tuple[tuple[int, int], int, float]] = {}
+        self.tasks: dict[str, tuple[int, int]] = {}
+        self._fields: dict[tuple[int, int], np.ndarray] = {}
+
+    def _field(self, env, target):
+        if target not in self._fields:
+            self._fields[target] = distance_fields(env.free, [target], env.scenario.corner_cutting)[0]
+        return self._fields[target]
 
     def act(self, env: GridSearchEnv) -> dict:
         live = [a for a in env.agents if env.alive.get(a)]
         if not live:
             return {}
+        if env.camera:
+            return self._act_camera(env, live)
         g = env.grid_size
         cc = env.scenario.corner_cutting
         gain = env.belief * env.scenario.detection_prob
@@ -154,4 +236,63 @@ class BeliefGreedy:
                 if best_key is None or key < best_key:
                     best, best_key = int(m), key
             out[a] = best
+        return out
+
+    def _act_camera(self, env, live) -> dict:
+        """Camera mode: check candidates within CONFIRM_RANGE first (nearest,
+        one drone each). Otherwise pick an (altitude, cell) pair by expected
+        detections over the footprint there, per step of travel and altitude
+        change; set the altitude first, then fly. Same commitment rule as above."""
+        g, cc = env.grid_size, env.scenario.corner_cutting
+        cand = env.candidates()
+        for a in list(self.tasks):
+            cx, cy = self.tasks[a]
+            if a not in live or cand[cy, cx] == 0:
+                del self.tasks[a]
+        claimed = set(self.tasks.values())
+        open_c = [(int(x), int(y)) for y, x in zip(*np.nonzero(cand)) if (int(x), int(y)) not in claimed]
+        for a in live:
+            if a in self.tasks or not open_c:
+                continue
+            D = self._field(env, tuple(int(v) for v in env.pos[a]))
+            dist = [D[c[1], c[0]] for c in open_c]
+            k = int(np.argmin(dist))
+            if dist[k] <= CONFIRM_RANGE:
+                self.tasks[a] = open_c.pop(k)
+                self.cam_targets.pop(a, None)
+        out = _confirm_actions(env, {a: c for a, c in self.tasks.items() if a in live}, self._field)
+
+        V = [cam.footprint_sum(env.belief, env.P[k]) for k in range(cam.N_ALT)]
+        for a in list(self.cam_targets):
+            (tx, ty), k, v0 = self.cam_targets[a]
+            arrived = tuple(int(v) for v in env.pos[a]) == (tx, ty) and env.alt[a] == k
+            if a not in live or a in self.tasks or arrived or V[k][ty, tx] < self.drop * v0:
+                del self.cam_targets[a]
+        need = [a for a in live if a not in self.tasks and a not in self.cam_targets]
+        if need:
+            taken = ~env.free.copy()
+            for (tx, ty), k, _ in self.cam_targets.values():
+                rr = self.r + cam.FOOT_R[k]
+                taken[max(0, ty - rr):ty + rr + 1, max(0, tx - rr):tx + rr + 1] = True
+            for a in need:
+                x, y = (int(v) for v in env.pos[a])
+                D = self._field(env, (x, y))
+                best = None
+                for k in range(cam.N_ALT):
+                    score = np.where(taken, -1.0, V[k] / (1.0 + D + abs(k - env.alt[a])))
+                    if k == env.alt[a]:
+                        score[y, x] = -1.0  # just searched it from here
+                    ty, tx = np.unravel_index(int(np.argmax(score)), score.shape)
+                    if best is None or score[ty, tx] > best[0]:
+                        best = (score[ty, tx], (int(tx), int(ty)), k)
+                _, (tx, ty), k = best
+                self.cam_targets[a] = ((tx, ty), k, float(V[k][ty, tx]))
+                rr = self.r + cam.FOOT_R[k]
+                taken[max(0, ty - rr):ty + rr + 1, max(0, tx - rr):tx + rr + 1] = True
+        for a in live:
+            if a in out:
+                continue
+            (tx, ty), k, _ = self.cam_targets[a]
+            m = _altitude_step(env.alt[a], k)
+            out[a] = m if m is not None else _toward(env, a, self._field(env, (tx, ty)), V[k])
         return out

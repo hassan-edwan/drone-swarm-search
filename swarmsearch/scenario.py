@@ -23,6 +23,10 @@ MAX_SPEED = 1.5  # m/s; lost people walk ~0.5-1.3 m/s, flood drift can be faster
 # Grid cells are 10 m and one env step is ~1 s, so a survivor moving at
 # v m/s changes cell with probability v / 10 per step.
 CELL_METERS = 10.0
+# M6 camera missions on 20x20: a mid-altitude footprint is 3 cells wide, so the
+# same area is covered about 3x faster than with the 1-cell camera; 100 steps
+# keeps the time pressure (the camera lawnmower finds about two thirds).
+CAMERA_STEPS = 100
 STEP_SECONDS = 1.0
 
 
@@ -72,6 +76,10 @@ class Scenario:
     detection_prob: float = 0.8
     drone_failure: bool = False  # one drone is lost at a random step
     max_steps: int = 200
+    # M6 camera (see camera.py): altitude, line of sight, cover, false alarms, light.
+    camera: bool = False
+    lighting: str = "day_rgb"  # day_rgb | dusk_rgb | night_thermal | midday_thermal
+    cover_frac: float = 0.0  # share of free cells under canopy (plus rubble next to buildings)
 
     def observed_profile(self) -> MovementProfile:
         return self.movement if self.profile_known else DEFAULT_PROFILE
@@ -96,13 +104,21 @@ class ScenarioSampler:
     p_profile_known: float = 0.5
     p_drone_failure: float = 0.25
     max_steps: int = 200
+    camera: bool = False
+    cover_frac: tuple[float, float] = (0.0, 0.4)
 
     def sample(self, rng: np.random.Generator) -> Scenario:
         kind = MOVEMENTS[rng.integers(len(MOVEMENTS))]
         speed = 0.0 if kind == "still" else float(rng.uniform(*self.speed_mps))
         drift = DRIFT_DIRS[rng.integers(len(DRIFT_DIRS))] if kind == "drift" else (0, 0)
         target = tuple(int(v) for v in rng.integers(0, self.grid_size, size=2)) if kind == "to_safety" else (0, 0)
+        cam = {}
+        if self.camera:  # drawn only in camera mode, so other scenarios keep their seeds
+            from .camera import LIGHT_NAMES
+            cam = dict(camera=True, lighting=LIGHT_NAMES[rng.integers(len(LIGHT_NAMES))],
+                       cover_frac=float(rng.uniform(*self.cover_frac)))
         return Scenario(
+            **cam,
             grid_size=self.grid_size,
             n_drones=int(rng.integers(self.drones[0], self.drones[1] + 1)),
             n_survivors=int(rng.integers(self.survivors[0], self.survivors[1] + 1)),

@@ -530,3 +530,101 @@ def test_gru_imitation_runs():
     assert 0.0 <= fit(net, seqs, epochs=1, log=lambda *_: None) <= 1.0
     seqs2, _ = collect(s, 2, 1, net, 0.0, workers=1)
     assert all(len(o) == len(y) for o, _, y in seqs2) and len(ms) == 2
+
+
+# ---------------------------------------------------------------- M6 camera
+def _cam_env(**kw):
+    sc = Scenario(camera=True, max_steps=100, **kw)
+    env = GridSearchEnv(sc, seed=0)
+    env.reset(seed=0)
+    return env
+
+
+def test_camera_dims_and_altitude_actions():
+    from swarmsearch.env import CAMERA_DIM, CLIMB, DESCEND, state_dim
+    env = _cam_env(obstacle_frac=0.2, cover_frac=0.3)
+    a = env.agents[0]
+    assert env._obs(a).shape == (obs_dim() + CAMERA_DIM,)
+    assert env.state().shape == (state_dim(20, True),)
+    assert len(env.action_mask(a)) == 11 and env.alt[a] == 1
+    env.step({a: CLIMB})
+    assert env.alt[a] == 2 and env.action_mask(a)[CLIMB] == 0
+    env.step({a: DESCEND})
+    env.step({a: DESCEND})
+    assert env.alt[a] == 0 and env.action_mask(a)[DESCEND] == 0
+
+
+def test_camera_footprint_grows_and_detection_drops_with_altitude():
+    env = _cam_env()
+    P = env.P[:, 10, 10]
+    assert [int((P[k] > 0).sum()) for k in range(3)] == [1, 9, 25]
+    assert P[0, 2, 2] > P[1, 2, 2] > P[2, 2, 2]
+
+
+def test_camera_buildings_block_line_of_sight():
+    from swarmsearch import camera as cam
+    h = np.zeros((20, 20))
+    h[10, 11] = 50.0  # tall building between (10,10) and (12,10)
+    vis = cam.line_of_sight(h)
+    assert not vis[2, 10, 10, 2, 4]  # high, looking 2 east: hidden
+    assert vis[2, 10, 10, 2, 0]  # looking 2 west: clear
+    h[10, 11] = 5.0  # a low shed does not hide it
+    assert cam.line_of_sight(h)[2, 10, 10, 2, 4]
+
+
+def test_camera_high_spots_low_confirms():
+    from swarmsearch.env import DESCEND
+    env = _cam_env(detection_prob=1.0, n_survivors=1, movement=MovementProfile("still", 0.0), profile_known=True)
+    a = env.agents[0]
+    others = {b: 8 for b in env.agents if b != a}
+    x, y = (int(v) for v in env.pos[a])
+    env.survivors[:] = [x + 1, y]  # every survivor in the next cell, inside the mid footprint
+    env.found[:] = False
+    for _ in range(10):  # hover at mid until spotted (about 60% per look off-centre)
+        env.step({a: 8, **others})
+        if env.candidates()[y, x + 1] > 0:
+            break
+    assert not env.found.any() and env.candidates()[y, x + 1] > 0  # spotted, not found
+    env.step({a: 4, **others})  # fly over it (still mid): still only a candidate
+    assert not env.found.any()
+    env.step({a: DESCEND, **others})  # low pass confirms (98%)
+    for _ in range(3):
+        if env.found.all():
+            break
+        env.step({a: 8, **others})
+    assert env.found.all() and env.candidates()[y, x + 1] == 0
+
+
+def test_camera_false_alarms_happen():
+    env = _cam_env(lighting="midday_thermal", cover_frac=0.4, n_survivors=1)
+    for _ in range(60):
+        if not env.agents:
+            break
+        env.step({a: 9 for a in env.agents})  # climb, then hover high
+    assert env.metrics()["false_alarms"] > 0
+
+
+def test_camera_baselines_beat_random():
+    from swarmsearch.baselines import BeliefGreedy
+    from swarmsearch.evaluate import CAMERA_CONDITIONS
+    make = CAMERA_CONDITIONS["cam_city_drift_unknown"]
+    env = GridSearchEnv(Scenario(camera=True), seed=0)
+    res = {}
+    for name, pol in [("random", RandomWalk(0)), ("lawn", Lawnmower()), ("greedy", BeliefGreedy())]:
+        res[name] = np.mean([run_episode(env, pol, make(s), s)["find_time_frac"] for s in range(4)])
+    assert res["greedy"] < res["random"] and res["lawn"] < res["random"]
+
+
+def test_camera_training_smoke(tmp_path):
+    from swarmsearch.mappo import Config, LearnedPolicy, load, save, train
+    cfg = Config(total_env_steps=2 * 2 * 32, n_envs=2, rollout_len=32, epochs=1,
+                 sampler=ScenarioSampler(camera=True, max_steps=40, obstacle_frac=(0.0, 0.2)),
+                 out_dir=str(tmp_path))
+    net = train(cfg, log_every=100)
+    save(net, cfg, tmp_path / "m.pt")
+    net2, _ = load(tmp_path / "m.pt")
+    assert net2.camera
+    from swarmsearch.evaluate import CAMERA_CONDITIONS
+    env = GridSearchEnv(Scenario(camera=True), seed=0)
+    m = run_episode(env, LearnedPolicy(net2), CAMERA_CONDITIONS["cam_open_wander"](0), 0)
+    assert 0.0 <= m["found_frac"] <= 1.0

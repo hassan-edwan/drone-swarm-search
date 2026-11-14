@@ -28,7 +28,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .env import GUIDE_DIM, TEAM_DIM, MAP_CHANNELS, MAX_DRONES, N_ACTIONS, GridSearchEnv, map_dim, obs_dim, state_dim
+from .env import (CAMERA_DIM, GUIDE_DIM, MAP_CHANNELS, MAX_DRONES, TEAM_DIM, GridSearchEnv, map_dim, n_actions,
+                  obs_dim, state_dim)
 from .guide import apply_plans, make_guide
 from .lookahead import path_value
 from .scenario import ScenarioSampler
@@ -119,17 +120,19 @@ def make_body(arch: str, grid_size: int, out: int, hidden: int, tf: dict | None 
 
 class ActorCritic(nn.Module):
     def __init__(self, grid_size: int, centralized: bool, hidden: int = 256, arch: str = "mlp",
-                 tf: dict | None = None, guided: bool = False, team: bool = False):
+                 tf: dict | None = None, guided: bool = False, team: bool = False, camera: bool = False):
         super().__init__()
         self.centralized = centralized
         self.arch = arch
         self.full_map = arch != "mlp"
         self.guided = guided
         self.team = team
-        o = self.vec = obs_dim() + (GUIDE_DIM if guided else 0) + (TEAM_DIM if team else 0)
-        self.actor = make_body(arch, grid_size, N_ACTIONS, hidden, tf, o)
+        self.camera = camera
+        o = self.vec = (obs_dim() + (GUIDE_DIM if guided else 0) + (TEAM_DIM if team else 0)
+                        + (CAMERA_DIM if camera else 0))
+        self.actor = make_body(arch, grid_size, n_actions(camera), hidden, tf, o)
         # MAPPO's critic gets the full global state plus the vector obs; IPPO's sees only the local obs.
-        self.critic = (mlp(o + state_dim(grid_size), 1, hidden) if centralized
+        self.critic = (mlp(o + state_dim(grid_size, camera), 1, hidden) if centralized
                        else make_body(arch, grid_size, 1, hidden, tf, o))
 
     def dist(self, obs: torch.Tensor, mask: torch.Tensor) -> torch.distributions.Categorical:
@@ -204,7 +207,8 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
             for _ in range(cfg.n_envs)]
     g = envs[0].grid_size
     dev = torch.device(cfg.device)
-    net = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided, cfg.team).to(dev)
+    camera = cfg.sampler.camera
+    net = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided, cfg.team, camera).to(dev)
     vec = net.vec
     T_ = lambda a: torch.from_numpy(a).to(dev)
     if cfg.init_from:
@@ -213,17 +217,17 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr, eps=1e-5)
     anchor = None
     if cfg.bc_anchor:
-        anchor = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided, cfg.team).to(dev)
+        anchor = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided, cfg.team, camera).to(dev)
         anchor.load_state_dict(torch.load(cfg.bc_anchor, weights_only=False, map_location="cpu")["state_dict"])
         anchor.eval()
 
     T, E, A = cfg.rollout_len, cfg.n_envs, MAX_DRONES
     o_dim = vec + (map_dim(g) if cfg.arch != "mlp" else 0)
-    c_dim = vec + state_dim(g) if centralized else o_dim
+    c_dim = vec + state_dim(g, camera) if centralized else o_dim
     buf = {
         "obs": np.zeros((T, E, A, o_dim), np.float32),
         "cin": np.zeros((T, E, A, c_dim), np.float32),
-        "mask": np.zeros((T, E, A, N_ACTIONS), np.float32),
+        "mask": np.zeros((T, E, A, n_actions(camera)), np.float32),
         "act": np.zeros((T, E, A), np.int64),
         "logp": np.zeros((T, E, A), np.float32),
         "val": np.zeros((T, E, A), np.float32),
@@ -401,7 +405,7 @@ def load(path: str | Path) -> tuple[ActorCritic, dict]:
     arch = cfg.get("arch") or ("cnn" if cfg.get("full_map") else "mlp")
     guided = cfg.get("guide", "none") not in (None, "none")
     net = ActorCritic(cfg["sampler"]["grid_size"], cfg["algo"] == "mappo", cfg["hidden"], arch, tf_kwargs(cfg), guided,
-                       cfg.get("team", False))
+                       cfg.get("team", False), cfg["sampler"].get("camera", False))
     net.load_state_dict(ck["state_dict"])
     net.eval()
     return net, cfg

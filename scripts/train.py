@@ -14,7 +14,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from swarmsearch.mappo import Config, train  # noqa: E402
-from swarmsearch.scenario import ScenarioSampler  # noqa: E402
+from swarmsearch.scenario import CAMERA_STEPS, ScenarioSampler  # noqa: E402
 
 
 def main():
@@ -41,6 +41,8 @@ def main():
     p.add_argument("--critic-warmup", type=int, default=0, help="updates training only the critic")
     p.add_argument("--team", action="store_true",
                    help="team layers in the observation (all teammates' positions, trails, intent)")
+    p.add_argument("--camera", action="store_true",
+                   help="M6 camera: altitude, line of sight, cover, false alarms, light (100-step missions)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--out", default=None)
@@ -66,7 +68,8 @@ def main():
         critic_warmup=a.critic_warmup,
         team=a.team,
         out_dir=a.out or f"runs/{a.algo}",
-        sampler=ScenarioSampler(grid_size=a.grid, obstacle_frac=(0.0, a.obstacles)),
+        sampler=ScenarioSampler(grid_size=a.grid, obstacle_frac=(0.0, a.obstacles), camera=a.camera,
+                                max_steps=CAMERA_STEPS if a.camera else 200),
     )
     train(cfg)
 
