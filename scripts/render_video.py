@@ -33,13 +33,16 @@ from swarmsearch.memory import GRUPolicy, RecurrentActor  # noqa: E402
 
 DRONE_COLORS = ["#2a78d6", "#1baf7a", "#6250d6", "#e87ba4", "#eda100", "#008300", "#e34948", "#52514e"]
 TRAIL = 12
+CAMERA_LABELS = {"m6_cam_2m": "MAPPO from scratch", "bc_greedy_cam": "Copy of the rule",
+                 "m6_cam_bc_rl_2m": "Copy + RL"}
 
 
 def camera_methods(models):
     out = [("Lawnmower sweep (mid, then confirm)", Lawnmower()), ("Belief-greedy rule", BeliefGreedy())]
     for path in models:
         net = load(path)[0]
-        out.append((f"MAPPO camera ({Path(path).stem})", LearnedPolicy(net, temperature=0)))
+        label = CAMERA_LABELS.get(Path(path).stem, f"MAPPO camera ({Path(path).stem})")
+        out.append((label, LearnedPolicy(net, temperature=0)))
     return out
 
 

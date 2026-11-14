@@ -33,6 +33,11 @@ Main findings:
 5. **Limitation:** when survivors are still and there is no prior information,
    nothing beats a plain sweep. That case is pure coverage, which a sweep
    already does optimally.
+6. **With a realistic camera** (altitude, line of sight, cover, false alarms,
+   lighting; §6.1), the rule still leads. A copy of the rule matches it, but
+   RL from scratch reaches only about two thirds of its finds, and RL
+   fine-tuning drifts back to that level because the training reward favours
+   slow low passes over "spot high, confirm low".
 
 ## 2. Problem and environment
 
@@ -226,7 +231,8 @@ Both videos are rebuilt with `scripts/render_video.py` and
   between all drones. Real radios have limited range and bandwidth.
 - **Sensing.** In the results above the camera sees only the cell directly
   below, with a fixed detection probability, and nothing blocks its view. The
-  camera mode in §6.1 removes this, but no policy is trained on it yet.
+  camera mode in §6.1 removes this; there, only a copy of the rule matches the
+  rule, and RL drifts away from it under the current reward.
 - **Flight.** 3D flight uses a PID controller tuned for calm-to-moderate wind,
   and the 3D results come from small samples.
 - **Compute.** All training ran on 4 CPU cores, so each model got 2M steps and
@@ -238,7 +244,8 @@ Both videos are rebuilt with `scripts/render_video.py` and
   range, or every few steps. The rule depends on a shared map, so this is
   where learned coordination could beat it.
 - **Battery and return-to-base**, so missions involve planning recharges.
-- **Camera view environment (M6, built; training paused).** Section 6.1.
+- **Camera view environment (M6).** Built and trained; section 6.1. A reward
+  that matches find time is the open problem.
 - **An RL flight controller** to replace PID, for stronger wind.
 - **Recurrent PPO** with the GRU actor, if the problem changes enough that
   memory matters.
@@ -287,16 +294,61 @@ darker buildings are taller.*
 hacking. The drones stayed high and collected the reward for clearing empty
 cells over the wide footprint, reaching 95% coverage while finding 0%,
 because they never descended to confirm. Ground cleared from mid or high now
-pays a quarter as much as a low pass. After that change the restarted run
-found 40–70% of survivors within its first 80 updates. Training is paused at
-update 79 of 1953 (about 4 hours of CPU for the full 2M steps).
+pays a quarter as much as a low pass.
 
-**Why it matters for the RL question.** Here the right move depends on several
-steps ahead: climb to scan, spot, descend, confirm, and choose viewpoints
-around buildings. That is where a one-target-ahead rule should struggle and a
-learned policy could pull ahead. The next steps are to finish training,
-evaluate on the nine `cam_*` conditions in `swarmsearch/evaluate.py` (100
-missions each), and fly the camera policy in 3D with altitude layers.
+**Three learned camera policies** were then trained (2M steps each, 4 CPU
+cores) and evaluated on the nine `cam_*` conditions, 100 missions each, top
+action:
+
+- *MAPPO from scratch* (`models/m6_cam_2m.pt`).
+- *Copy of the rule* (`models/bc_greedy_cam.pt`): behaviour cloning + DAgger
+  on the camera belief-greedy rule, as in §4.4.
+- *Copy + RL* (`models/m6_cam_bc_rl_2m.pt`): the copy fine-tuned with MAPPO,
+  anchored to it by a KL term that fades out over the first half of training.
+
+| Condition | Sweep | Rule | From scratch | Copy | Copy + RL |
+|---|---|---|---|---|---|
+| Open ground, wander | 48 / 88% | 46 / 87% | 75 / 45% | **44 / 88%** | 74 / 45% |
+| Tree canopy, wander | 59 / 70% | **54 / 75%** | 78 / 38% | 55 / 73% | 79 / 38% |
+| City, drift | 55 / 76% | **51 / 79%** | 70 / 57% | 53 / 75% | 75 / 47% |
+| City, head to safety | 54 / 80% | 47 / 87% | 64 / 67% | **46 / 84%** | 65 / 64% |
+| Dusk, city | 77 / 44% | **75 / 45%** | 85 / 27% | 77 / 40% | 85 / 26% |
+| Night, thermal | 58 / 77% | 51 / 84% | 66 / 66% | **50 / 81%** | 68 / 62% |
+| Midday, thermal | **74 / 49%** | **74 / 50%** | 84 / 30% | 75 / 47% | 85 / 28% |
+| Zones, still | 51 / 81% | 43 / 83% | 54 / 70% | **41 / 83%** | 64 / 52% |
+| Random mix | 55 / 71% | 51 / 78% | 58 / 65% | **49 / 78%** | 63 / 57% |
+
+*Each cell: mean find time (steps, of 100) / survivors found. ±1–2 steps.*
+
+- **The rule is the bar again, and only its copy reaches it.** The copy
+  matches the rule within about 2 steps everywhere and is 1–2 steps faster on
+  five conditions, which is within noise. It inherits the rule's whole
+  routine: about 35 candidate reports per mission and over 90% coverage.
+- **RL from scratch never learns the camera routine.** It covers 50–60% of
+  the ground and raises almost no candidates (0.2 per mission against 23–52
+  for the others), so it rarely uses "spot from high, confirm low".
+- **RL fine-tuning undoes the copy.** While the KL anchor was on, training
+  episodes covered about 90% of the ground. Once it faded (update ~980 of
+  1953) coverage fell to about 68% and the policy drifted to the
+  from-scratch behaviour: 0.7–4 candidates per mission and find times
+  10–15 steps slower than the copy. So the reward, not the optimiser, pulls
+  away from the good strategy: a high pass pays only a quarter of a low one
+  (the anti-hacking fix), so the cheapest reward is a slow low search. The
+  training reward and the find-time metric disagree in camera mode.
+- **Dusk and midday thermal are sensor-limited.** Every method finds under
+  half the survivors there.
+
+![All camera methods on one mission](../results/figures/camera_models_frame.png)
+
+*Video: [`results/figures/camera_models.mp4`](../results/figures/camera_models.mp4)
+(city, survivors head to safety, seed 1). The copy finds 10/10 in 41 steps;
+the sweep 9/10, the rule 8/10, from scratch and copy + RL 5/10.*
+
+**Next step.** Fix the reward before training more. Candidates: pay a
+confirmed find in proportion to how early it happens (directly the find-time
+metric), or pay a candidate report its expected value (the survivor mass
+behind it) instead of discounting all high-altitude clearing. Then rerun only
+the copy + RL fine-tune.
 
 ## 7. Reproducing
 
@@ -311,4 +363,8 @@ python scripts/make_figures.py                                                  
 python scripts/render_video.py --condition obs20_to_safety_unknown --seed 1        # 2D video
 ~/venv3d/bin/python scripts/render_video_3d.py --condition m4_to_safety_unknown    # 3D video (PyBullet)
 python scripts/train.py --camera --obstacles 0.3 --out runs/cam                    # camera mode (§6.1)
+python scripts/imitate.py --camera --obstacles 0.3 --episodes 500 --out models/bc_greedy_cam.pt
+python scripts/evaluate.py --camera --models models/bc_greedy_cam.pt --temps 0 --out results/m6
+python scripts/render_video.py --condition cam_city_to_safety_unknown --seed 1 \
+    --models models/m6_cam_2m.pt models/bc_greedy_cam.pt models/m6_cam_bc_rl_2m.pt --out results/figures/camera_models.mp4
 ```
