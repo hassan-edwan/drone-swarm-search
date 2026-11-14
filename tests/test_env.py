@@ -520,3 +520,13 @@ def test_team_layers():
     for _ in range(3):
         env.step({x: 8 for x in env.agents})
     assert np.isfinite(env._obs(a)).all()
+
+
+def test_gru_imitation_runs():
+    from swarmsearch.memory import RecurrentActor, collect, fit
+    s = ScenarioSampler(max_steps=20)
+    seqs, ms = collect(s, 2, 0, None, 1.0, workers=1)
+    net = RecurrentActor()
+    assert 0.0 <= fit(net, seqs, epochs=1, log=lambda *_: None) <= 1.0
+    seqs2, _ = collect(s, 2, 1, net, 0.0, workers=1)
+    assert all(len(o) == len(y) for o, _, y in seqs2) and len(ms) == 2
