@@ -101,47 +101,46 @@ def make_heights(rng: np.random.Generator, obstacles: np.ndarray) -> np.ndarray:
 def line_of_sight(heights: np.ndarray, n_samples: int = 16) -> np.ndarray:
     """(N_ALT, g, g, SIDE, SIDE) bool: from each cell and altitude, is the
     ground at each footprint offset visible (no building above the sight line)?"""
-    g = heights.shape[0]
-    yy, xx = np.mgrid[0:g, 0:g]
-    vis = np.ones((N_ALT, g, g, SIDE, SIDE), dtype=bool)
+    gy, gx = heights.shape
+    yy, xx = np.mgrid[0:gy, 0:gx]
+    vis = np.ones((N_ALT, gy, gx, SIDE, SIDE), dtype=bool)
     ts = (np.arange(n_samples) + 0.5) / n_samples
     for oy in range(SIDE):
         for ox in range(SIDE):
             dy, dx = oy - R, ox - R
             if dx == 0 and dy == 0:
                 continue
+            # All sample points along the line at once: (n_samples, gy, gx).
+            sx = np.floor(xx + 0.5 + dx * ts[:, None, None]).astype(int)
+            sy = np.floor(yy + 0.5 + dy * ts[:, None, None]).astype(int)
+            inside = (sx >= 0) & (sx < gx) & (sy >= 0) & (sy < gy)
+            is_target = (sx == xx + dx) & (sy == yy + dy)
+            h = heights[np.clip(sy, 0, gy - 1), np.clip(sx, 0, gx - 1)]
+            h = np.where(inside & ~is_target, h, -np.inf)
             for alt in range(N_ALT):
-                blocked = np.zeros((g, g), dtype=bool)
-                for t in ts:
-                    sx = np.floor(xx + 0.5 + dx * t).astype(int)
-                    sy = np.floor(yy + 0.5 + dy * t).astype(int)
-                    inside = (sx >= 0) & (sx < g) & (sy >= 0) & (sy < g)
-                    sxc, syc = np.clip(sx, 0, g - 1), np.clip(sy, 0, g - 1)
-                    is_target = (sx == xx + dx) & (sy == yy + dy)
-                    line_h = ALT_M[alt] * (1 - t) + PERSON_M * t
-                    blocked |= inside & ~is_target & (heights[syc, sxc] > line_h)
-                vis[alt, :, :, oy, ox] = ~blocked
+                line_h = ALT_M[alt] * (1 - ts) + PERSON_M * ts
+                vis[alt, :, :, oy, ox] = ~(h > line_h[:, None, None]).any(axis=0)
     return vis
 
 
 def tables(free: np.ndarray, heights: np.ndarray, cover: np.ndarray, base_p: float,
            lighting: str) -> tuple[np.ndarray, np.ndarray]:
     """P and FA, both (N_ALT, g, g, SIDE, SIDE)."""
-    g = free.shape[0]
+    gy, gx = free.shape
     det, fa_mult, canopy = LIGHTING[lighting]
     cover_det = np.choose(cover, [1.0, RUBBLE_DETECT, canopy])
     cover_fa = np.choose(cover, COVER_FA)
     vis = line_of_sight(heights)
-    yy, xx = np.mgrid[0:g, 0:g]
-    P = np.zeros((N_ALT, g, g, SIDE, SIDE))
+    yy, xx = np.mgrid[0:gy, 0:gx]
+    P = np.zeros((N_ALT, gy, gx, SIDE, SIDE))
     FA = np.zeros_like(P)
     for oy in range(SIDE):
         for ox in range(SIDE):
             dy, dx = oy - R, ox - R
             ring = max(abs(dx), abs(dy))
             tx, ty = xx + dx, yy + dy
-            ok = (tx >= 0) & (tx < g) & (ty >= 0) & (ty < g)
-            txc, tyc = np.clip(tx, 0, g - 1), np.clip(ty, 0, g - 1)
+            ok = (tx >= 0) & (tx < gx) & (ty >= 0) & (ty < gy)
+            txc, tyc = np.clip(tx, 0, gx - 1), np.clip(ty, 0, gy - 1)
             ok &= free[tyc, txc]
             for alt in range(N_ALT):
                 if ring > FOOT_R[alt]:
@@ -167,3 +166,21 @@ def footprint_sum(grid: np.ndarray, P_alt: np.ndarray) -> np.ndarray:
 def light_vector(lighting: str) -> np.ndarray:
     det, fa, canopy = LIGHTING[lighting]
     return np.array([det, fa / 2.5, canopy], dtype=np.float32)
+
+
+def update_tables(P: np.ndarray, FA: np.ndarray, free: np.ndarray, heights: np.ndarray, cover: np.ndarray,
+                  base_p: float, lighting: str, changed: np.ndarray):
+    """Recompute P and FA in place for every drone cell whose footprint can
+    reach a changed cell (within 2R: the cell itself or a sight line over it).
+    Much cheaper than tables() when a few cells change mid-mission."""
+    g = free.shape[0]
+    ys, xs = np.nonzero(changed)
+    if not len(ys):
+        return
+    y0, y1 = max(0, ys.min() - 2 * R), min(g, ys.max() + 2 * R + 1)  # drone cells to update
+    x0, x1 = max(0, xs.min() - 2 * R), min(g, xs.max() + 2 * R + 1)
+    cy0, cy1, cx0, cx1 = max(0, y0 - R), min(g, y1 + R), max(0, x0 - R), min(g, x1 + R)  # what they can see
+    sub = (slice(cy0, cy1), slice(cx0, cx1))
+    p, fa = tables(free[sub], heights[sub], cover[sub], base_p, lighting)
+    P[:, y0:y1, x0:x1] = p[:, y0 - cy0:y1 - cy0, x0 - cx0:x1 - cx0]
+    FA[:, y0:y1, x0:x1] = fa[:, y0 - cy0:y1 - cy0, x0 - cx0:x1 - cx0]

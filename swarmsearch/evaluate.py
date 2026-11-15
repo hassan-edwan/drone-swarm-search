@@ -111,7 +111,32 @@ CAMERA_CONDITIONS = {
     "cam_zones_still": _cam("still", 0.0, True, cover=0.3, n_zones=3),
     "cam_random_mix": _sampled(obstacle_frac=(0.0, 0.3), camera=True, max_steps=CAMERA_STEPS),
 }
-ALL_CONDITIONS = {**CONDITIONS, **SPEED_SWEEP, **M2_CONDITIONS, **M4_CONDITIONS, **M5_CONDITIONS, **CAMERA_CONDITIONS}
+# M7: the real-world effects (realism.py), one at a time on the same city
+# mission, then all together, then randomly drawn. Each single-effect
+# condition shows how much that gap between model and world costs.
+SENSOR = dict(sensor_scale=0.6, fa_scale=2.0, vis_sd=0.4)
+COLLAPSE = dict(collapse_frac=0.4)
+RADIO = dict(comm_range=12.0, comm_loss=0.1)
+POSITION = dict(wind_mps=8.0, gps_err=0.06)
+PEOPLE = dict(behaviour="mixed")
+
+
+def _real(**kw):
+    return _cam("to_safety", 1.0, False, cover=0.2, obstacle_frac=0.25, real=True, **kw)
+
+
+REAL_CONDITIONS = {
+    "real_none": _real(),
+    "real_sensor": _real(**SENSOR),
+    "real_collapse": _real(**COLLAPSE),
+    "real_radio": _real(**RADIO),
+    "real_position": _real(**POSITION),
+    "real_people": _real(**PEOPLE),
+    "real_all": _real(**SENSOR, **COLLAPSE, **RADIO, **POSITION, **PEOPLE),
+    "real_random_mix": _sampled(obstacle_frac=(0.0, 0.3), camera=True, real=True, max_steps=CAMERA_STEPS),
+}
+ALL_CONDITIONS = {**CONDITIONS, **SPEED_SWEEP, **M2_CONDITIONS, **M4_CONDITIONS, **M5_CONDITIONS, **CAMERA_CONDITIONS,
+                  **REAL_CONDITIONS}
 
 
 def run_episode(env: GridSearchEnv, policy, scenario: Scenario, seed: int) -> dict:
@@ -131,7 +156,8 @@ def evaluate(policies: dict, conditions: dict | None = None, n_episodes: int = 5
         results[cname] = {}
         sc0 = make(0)
         g = sc0.grid_size
-        env = envs.setdefault((g, sc0.camera), GridSearchEnv(Scenario(grid_size=g, camera=sc0.camera)))
+        env = envs.setdefault((g, sc0.camera, sc0.real),
+                              GridSearchEnv(Scenario(grid_size=g, camera=sc0.camera, real=sc0.real)))
         for pname, policy in policies.items():
             rows = [run_episode(env, policy, make(s), seed=s) for s in range(n_episodes)]
             results[cname][pname] = summarise(rows, rows and make(0).max_steps)
@@ -155,6 +181,9 @@ def summarise(rows: list[dict], max_steps: int) -> dict:
         "shield": float(np.mean([r.get("shield", 0) for r in rows])),
         "alarms": float(np.mean([r.get("alarms", 0) for r in rows])),
         "false_alarms": float(np.mean([r.get("false_alarms", 0) for r in rows])),
+        "bumps": float(np.mean([r.get("bumps", 0) for r in rows])),
+        "linked": float(np.mean([r.get("linked", 1.0) for r in rows])),
+        "revealed": float(np.mean([r.get("revealed", 1.0) for r in rows])),
     }
 
 

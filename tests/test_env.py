@@ -665,3 +665,112 @@ def test_find_time_reward_sums_to_the_metric():
         m = env.metrics()
         assert m["found_frac"] > 0
         assert total == pytest.approx(E.FIND_TIME_REWARD * 4 * (1 - m["find_time"] / 60))
+
+
+# ---------------------------------------------------------------- M7 real world
+def _real_env(**kw):
+    sc = Scenario(camera=True, real=True, max_steps=100, obstacle_frac=0.25, **kw)
+    return GridSearchEnv(sc), sc
+
+
+def test_real_dims_match_the_network():
+    from swarmsearch.env import REAL_DIM
+    from swarmsearch.mappo import ActorCritic
+    env, sc = _real_env(sensor_scale=0.6, collapse_frac=0.4, comm_range=10.0, wind_mps=5.0, gps_err=0.05,
+                        behaviour="mixed")
+    obs, _ = env.reset(seed=0, options={"scenario": sc})
+    net = ActorCritic(20, True, camera=True, real=True)
+    o = obs["drone_0"]
+    assert o.shape == (net.vec,) and net.vec == env._obs_dim
+    assert env.state().shape == (state_dim(20, True, True),)
+    assert REAL_DIM == 8
+
+
+def test_real_collapse_hidden_until_seen():
+    from swarmsearch.baselines import BeliefGreedy
+    env, sc = _real_env(collapse_frac=1.0)
+    env.reset(seed=1, options={"scenario": sc})
+    hidden = env.unseen  # collapses not seen yet (the first look from the base may reveal one)
+    assert hidden.any() and env.obstacles[hidden].all()  # the map still shows buildings there
+    assert env.true_free[env.collapsed].all()
+    assert env.belief[hidden].sum() == 0
+    pol = BeliefGreedy()
+    pol.reset(env)
+    while env.agents:
+        env.step(pol.act(env))
+    seen = env.collapsed & ~env.unseen
+    assert seen.any()
+    assert env.free[seen].all() and not env.obstacles[seen].any() and env.map_version > 0
+    # the drones' camera tables now match a full rebuild on the updated map
+    from swarmsearch import camera as cam
+    P, _ = cam.tables(env.free, env.heights, env.cover, sc.detection_prob, sc.lighting)
+    assert np.allclose(P, env.P)
+
+
+def test_real_sensor_scale_lowers_true_detection_only():
+    env, sc = _real_env(sensor_scale=0.5)
+    env.reset(seed=2, options={"scenario": sc})
+    on = env.P > 0
+    assert env.P_true[on].mean() < 0.6 * env.P[on].mean()  # the map assumes the nominal sensor
+
+
+def test_real_radio_splits_and_merges_maps():
+    env, sc = _real_env(comm_range=3.0)
+    env.reset(seed=3, options={"scenario": sc})
+    views = env._distinct_views()
+    assert len(views) == 1  # all start together at the base
+    split = False
+    rng = np.random.default_rng(0)
+    for _ in range(40):
+        if not env.agents:
+            break
+        acts = {a: int(rng.choice(np.flatnonzero(env.action_mask(a)))) for a in env.agents}
+        env.step(acts)
+        split |= len(env._distinct_views()) > 1
+    assert split
+    # merging two copies keeps the lower (better informed) value everywhere
+    vs = env._distinct_views()
+    if len(vs) > 1:
+        m = env._merge(vs[:2])
+        assert np.allclose(m.B, np.minimum(vs[0].B, vs[1].B))
+
+
+def test_real_position_error_and_wind():
+    env, sc = _real_env(wind_mps=10.0, gps_err=0.3)
+    env.reset(seed=4, options={"scenario": sc})
+    rng = np.random.default_rng(1)
+    off = 0
+    while env.agents:
+        acts = {a: int(rng.choice(np.flatnonzero(env.action_mask(a)))) for a in env.agents}
+        env.step(acts)
+        off += sum(not np.array_equal(env.pos[a], env.true_pos[a]) for a in env.agents)
+        for a in env.agents:  # the drone is never more than a cell from where it thinks it is
+            assert np.abs(env.pos[a] - env.true_pos[a]).max() <= 1
+            x, y = env.true_pos[a]
+            assert env.true_free[y, x]
+    assert off > 0 and env.n_slips > 0
+    assert env.n_collisions == 0  # detect-and-avoid works on where drones really are
+
+
+def test_real_trapped_people_stay_put():
+    env, sc = _real_env(collapse_frac=1.0, behaviour="mixed",
+                        movement=MovementProfile("wander", 1.5))
+    env.reset(seed=5, options={"scenario": sc})
+    assert env.trapped.any()
+    start = env.survivors[env.trapped].copy()
+    rng = np.random.default_rng(2)
+    for _ in range(30):
+        if not env.agents:
+            break
+        env.step({a: int(rng.choice(np.flatnonzero(env.action_mask(a)))) for a in env.agents})
+    assert np.array_equal(env.survivors[env.trapped], start)
+    assert env.true_free[env.survivors[:, 1], env.survivors[:, 0]].all()
+
+
+def test_shield_terminates_when_drones_think_they_share_a_cell():
+    env, sc = _real_env(gps_err=0.3)
+    env.reset(seed=6, options={"scenario": sc})
+    a, b = env.agents[:2]
+    env.pos[b] = env.pos[a].copy()  # a bad GPS fix puts both in one believed cell
+    t = env.targets({a: HOVER, b: HOVER}, count=True)
+    assert np.array_equal(t[a], env.pos[a]) and np.array_equal(t[b], env.pos[b])

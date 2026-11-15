@@ -36,14 +36,16 @@ def main():
     p.add_argument("--team", action="store_true",
                    help="team layers in the observation (all teammates' positions, trails, intent)")
     p.add_argument("--camera", action="store_true", help="M6 camera mode (100-step missions)")
+    p.add_argument("--real", action="store_true", help="M7 real-world effects (implies --camera)")
     p.add_argument("--out", default="models/bc_greedy.pt")
     a = p.parse_args()
 
     torch.manual_seed(a.seed)
-    sampler = ScenarioSampler(obstacle_frac=(0.0, a.obstacles), camera=a.camera,
+    a.camera = a.camera or a.real
+    sampler = ScenarioSampler(obstacle_frac=(0.0, a.obstacles), camera=a.camera, real=a.real,
                               max_steps=CAMERA_STEPS if a.camera else 200)
     cfg = Config(sampler=sampler, seed=a.seed, out_dir=str(Path(a.out).parent), team=a.team)
-    net = ActorCritic(sampler.grid_size, True, cfg.hidden, team=a.team, camera=a.camera)
+    net = ActorCritic(sampler.grid_size, True, cfg.hidden, team=a.team, camera=a.camera, real=a.real)
     data = None
     t0 = time.time()
     for r, beta in enumerate(a.betas):

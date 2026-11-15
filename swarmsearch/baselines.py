@@ -140,24 +140,37 @@ class Lawnmower:
         return out
 
     def _confirm(self, env) -> dict:
-        """Actions for drones busy checking a candidate (camera mode)."""
-        cand = env.candidates()
+        """Actions for drones busy checking a candidate (camera mode). Each
+        drone sees its own copy of the map and its radio group's claims (M7)."""
+        if getattr(self, "_ver", None) != env.map_version:
+            self._fields, self._ver = {}, env.map_version
+        cands = _candidates_by_view(env, env.agents)
         for a in list(self.tasks):  # done when the cell was checked from low, or the drone is gone
             cx, cy = self.tasks[a]
-            if a not in env.agents or cand[cy, cx] == 0:
+            if a not in env.agents or cands[a][cy, cx] == 0:
                 del self.tasks[a]
-        claimed = set(self.tasks.values())
-        open_c = [(int(x), int(y)) for y, x in zip(*np.nonzero(cand)) if (int(x), int(y)) not in claimed]
         for a in env.agents:
-            if a in self.tasks or not open_c:
+            if a in self.tasks:
                 continue
+            claimed = {self.tasks[b] for b in self.tasks if env.view_of(b) is env.view_of(a)}
+            cand = cands[a]
+            open_c = [(int(x), int(y)) for y, x in zip(*np.nonzero(cand)) if (int(x), int(y)) not in claimed]
             x, y = (int(v) for v in env.pos[a])
             near = [c for c in open_c if max(abs(c[0] - x), abs(c[1] - y)) <= CONFIRM_RANGE]
             if near:
-                c = min(near, key=lambda c: max(abs(c[0] - x), abs(c[1] - y)))
-                self.tasks[a] = c
-                open_c.remove(c)
+                self.tasks[a] = min(near, key=lambda c: max(abs(c[0] - x), abs(c[1] - y)))
         return _confirm_actions(env, self.tasks, self._field)
+
+
+def _candidates_by_view(env, agents) -> dict:
+    """Each drone's candidate map (one shared map without radio limits)."""
+    cache, out = {}, {}
+    for a in agents:
+        v = env.view_of(a)
+        if id(v) not in cache:
+            cache[id(v)] = env.use_view(a).candidates()
+        out[a] = cache[id(v)]
+    return out
 
 
 def _confirm_actions(env, tasks, field_of) -> dict:
@@ -244,37 +257,53 @@ class BeliefGreedy:
         detections over the footprint there, per step of travel and altitude
         change; set the altitude first, then fly. Same commitment rule as above."""
         g, cc = env.grid_size, env.scenario.corner_cutting
-        cand = env.candidates()
+        if getattr(self, "_ver", None) != env.map_version:  # a collapse was found: paths changed
+            self._fields, self._ver = {}, env.map_version
+        # Each drone plans on its own copy of the map, and knows the claims of
+        # its radio group only (M7); without radio limits all of this is shared.
+        cands = _candidates_by_view(env, live)
+        Vs: dict = {}
+        for a in live:
+            v = env.view_of(a)
+            if id(v) not in Vs:
+                env.use_view(a)
+                Vs[id(v)] = [cam.footprint_sum(env.belief, env.P[k]) for k in range(cam.N_ALT)]
+        V_of = {a: Vs[id(env.view_of(a))] for a in live}
+        same = {a: [b for b in live if env.view_of(b) is env.view_of(a)] for a in live}
         for a in list(self.tasks):
             cx, cy = self.tasks[a]
-            if a not in live or cand[cy, cx] == 0:
+            if a not in live or cands[a][cy, cx] == 0:
                 del self.tasks[a]
-        claimed = set(self.tasks.values())
-        open_c = [(int(x), int(y)) for y, x in zip(*np.nonzero(cand)) if (int(x), int(y)) not in claimed]
         for a in live:
-            if a in self.tasks or not open_c:
+            if a in self.tasks:
+                continue
+            claimed = {self.tasks[b] for b in same[a] if b in self.tasks}
+            open_c = [(int(x), int(y)) for y, x in zip(*np.nonzero(cands[a])) if (int(x), int(y)) not in claimed]
+            if not open_c:
                 continue
             D = self._field(env, tuple(int(v) for v in env.pos[a]))
             dist = [D[c[1], c[0]] for c in open_c]
             k = int(np.argmin(dist))
             if dist[k] <= CONFIRM_RANGE:
-                self.tasks[a] = open_c.pop(k)
+                self.tasks[a] = open_c[k]
                 self.cam_targets.pop(a, None)
         out = _confirm_actions(env, {a: c for a, c in self.tasks.items() if a in live}, self._field)
 
-        V = [cam.footprint_sum(env.belief, env.P[k]) for k in range(cam.N_ALT)]
         for a in list(self.cam_targets):
             (tx, ty), k, v0 = self.cam_targets[a]
             arrived = tuple(int(v) for v in env.pos[a]) == (tx, ty) and env.alt[a] == k
-            if a not in live or a in self.tasks or arrived or V[k][ty, tx] < self.drop * v0:
+            if a not in live or a in self.tasks or arrived or V_of[a][k][ty, tx] < self.drop * v0:
                 del self.cam_targets[a]
         need = [a for a in live if a not in self.tasks and a not in self.cam_targets]
         if need:
-            taken = ~env.free.copy()
-            for (tx, ty), k, _ in self.cam_targets.values():
-                rr = self.r + cam.FOOT_R[k]
-                taken[max(0, ty - rr):ty + rr + 1, max(0, tx - rr):tx + rr + 1] = True
             for a in need:
+                V = V_of[a]
+                taken = ~env.free.copy()
+                for b in same[a]:
+                    if b in self.cam_targets:
+                        (tx, ty), k, _ = self.cam_targets[b]
+                        rr = self.r + cam.FOOT_R[k]
+                        taken[max(0, ty - rr):ty + rr + 1, max(0, tx - rr):tx + rr + 1] = True
                 x, y = (int(v) for v in env.pos[a])
                 D = self._field(env, (x, y))
                 best = None
@@ -287,12 +316,10 @@ class BeliefGreedy:
                         best = (score[ty, tx], (int(tx), int(ty)), k)
                 _, (tx, ty), k = best
                 self.cam_targets[a] = ((tx, ty), k, float(V[k][ty, tx]))
-                rr = self.r + cam.FOOT_R[k]
-                taken[max(0, ty - rr):ty + rr + 1, max(0, tx - rr):tx + rr + 1] = True
         for a in live:
             if a in out:
                 continue
             (tx, ty), k, _ = self.cam_targets[a]
             m = _altitude_step(env.alt[a], k)
-            out[a] = m if m is not None else _toward(env, a, self._field(env, (tx, ty)), V[k])
+            out[a] = m if m is not None else _toward(env, a, self._field(env, (tx, ty)), V_of[a][k])
         return out

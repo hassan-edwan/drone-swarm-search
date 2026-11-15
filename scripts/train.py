@@ -46,12 +46,14 @@ def main():
     p.add_argument("--reward", choices=["count", "find_time"], default="count",
                    help="find_time: each find pays more the earlier it happens (matches the metric)")
     p.add_argument("--ent-coef", type=float, default=0.01, help="exploration (entropy) bonus; 0 turns it off")
+    p.add_argument("--real", action="store_true", help="M7 real-world effects (implies --camera)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--out", default=None)
     a = p.parse_args()
 
     torch.set_num_threads(a.threads)
+    a.camera = a.camera or a.real
     cfg = Config(
         algo=a.algo,
         total_env_steps=a.steps,
@@ -74,7 +76,7 @@ def main():
         ent_coef=a.ent_coef,
         out_dir=a.out or f"runs/{a.algo}",
         sampler=ScenarioSampler(grid_size=a.grid, obstacle_frac=(0.0, a.obstacles), camera=a.camera,
-                                max_steps=CAMERA_STEPS if a.camera else 200),
+                                real=a.real, max_steps=CAMERA_STEPS if a.camera else 200),
     )
     train(cfg)
 

@@ -80,6 +80,17 @@ class Scenario:
     camera: bool = False
     lighting: str = "day_rgb"  # day_rgb | dusk_rgb | night_thermal | midday_thermal
     cover_frac: float = 0.0  # share of free cells under canopy (plus rubble next to buildings)
+    # M7 real world (see realism.py); needs camera=True. Every effect is off at its default.
+    real: bool = False  # adds the M7 observation and state extras
+    sensor_scale: float = 1.0  # true detection chance / the one the drones' map assumes
+    fa_scale: float = 1.0  # true false-alarm rate / assumed
+    vis_sd: float = 0.0  # spread of how visible each person is (log-normal sigma)
+    collapse_frac: float = 0.0  # share of buildings collapsed into rubble; unknown until seen
+    comm_range: float = 0.0  # radio range in cells with line of sight; 0 = perfect links
+    comm_loss: float = 0.0  # chance a link drops for a step
+    wind_mps: float = 0.0  # steady wind: pushes drones off the cell they aimed for
+    gps_err: float = 0.0  # chance a position fix is a cell off (x3 next to tall buildings)
+    behaviour: str = "uniform"  # "uniform": everyone follows `movement`; "mixed": per-person behaviour
 
     def observed_profile(self) -> MovementProfile:
         return self.movement if self.profile_known else DEFAULT_PROFILE
@@ -106,6 +117,7 @@ class ScenarioSampler:
     max_steps: int = 200
     camera: bool = False
     cover_frac: tuple[float, float] = (0.0, 0.4)
+    real: bool = False  # M7: draw every real-world effect (camera mode only)
 
     def sample(self, rng: np.random.Generator) -> Scenario:
         kind = MOVEMENTS[rng.integers(len(MOVEMENTS))]
@@ -117,6 +129,9 @@ class ScenarioSampler:
             from .camera import LIGHT_NAMES
             cam = dict(camera=True, lighting=LIGHT_NAMES[rng.integers(len(LIGHT_NAMES))],
                        cover_frac=float(rng.uniform(*self.cover_frac)))
+        if self.real:  # drawn last, so camera scenarios keep their seeds
+            from .realism import sample_real
+            cam.update(sample_real(rng))
         return Scenario(
             **cam,
             grid_size=self.grid_size,
