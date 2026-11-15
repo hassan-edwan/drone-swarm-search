@@ -45,6 +45,7 @@ def main():
                    help="M6 camera: altitude, line of sight, cover, false alarms, light (100-step missions)")
     p.add_argument("--reward", choices=["count", "find_time"], default="count",
                    help="find_time: each find pays more the earlier it happens (matches the metric)")
+    p.add_argument("--ent-coef", type=float, default=0.01, help="exploration (entropy) bonus; 0 turns it off")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--out", default=None)
@@ -70,6 +71,7 @@ def main():
         critic_warmup=a.critic_warmup,
         team=a.team,
         reward=a.reward,
+        ent_coef=a.ent_coef,
         out_dir=a.out or f"runs/{a.algo}",
         sampler=ScenarioSampler(grid_size=a.grid, obstacle_frac=(0.0, a.obstacles), camera=a.camera,
                                 max_steps=CAMERA_STEPS if a.camera else 200),
