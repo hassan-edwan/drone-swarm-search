@@ -32,10 +32,12 @@ def _rollouts(args) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict]]:
     sampler, n_episodes, seed, state_dict, beta, team = args
     torch.set_num_threads(1)
     rng = np.random.default_rng(seed)
-    env = GridSearchEnv(sampler=sampler, seed=seed, team=team)
+    from .envs import is_field, make_env
+    env = make_env(sampler=sampler, seed=seed, team=team)
     net = None
     if state_dict is not None:
-        net = ActorCritic(sampler.grid_size, True, team=team, camera=sampler.camera, real=sampler.real)
+        net = ActorCritic(sampler.grid_size, True, team=team, camera=sampler.camera, real=sampler.real,
+                          field=is_field(sampler))
         net.load_state_dict(state_dict)
         net.eval()
     O, M, A, metrics = [], [], [], []
@@ -50,7 +52,9 @@ def _rollouts(args) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict]]:
             mask = np.stack([env.action_mask(a) for a in agents])
             O.append(obs)
             M.append(mask)
-            A.append(np.array([labels.get(a, 8) for a in agents]))
+            # a drone the autopilot flies can only hover (its mask says so): label it that way
+            A.append(np.array([labels.get(a, 8) if m[labels.get(a, 8)] else int(np.argmax(m))
+                               for a, m in zip(agents, mask)]))
             if net is None or rng.random() < beta:
                 acts = labels
             else:

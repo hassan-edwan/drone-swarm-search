@@ -116,19 +116,24 @@ class View:
     and groups merge theirs when they meet again."""
 
     __slots__ = ("B", "w", "belief", "decay", "cand_t", "last_searched", "finds", "mates",
-                 "exp_low", "found_low", "exp_high", "reports", "synced")
+                 "exp_low", "found_low", "exp_high", "reports", "synced",
+                 "out", "N", "map", "s_est", "outbox")  # field environment (M8)
 
     def __init__(self):
         self.finds: dict[int, tuple[int, int]] = {}  # survivor -> cell where this map saw it found
         self.mates: dict[str, tuple[np.ndarray, int]] = {}  # last known (cell, time) of each drone
         self.exp_low = self.found_low = self.exp_high = self.reports = 0.0
         self.synced = 0
+        self.out = self.N = self.map = None
+        self.s_est = 1.0
+        self.outbox: list = []
 
     def copy(self) -> "View":
         v = View()
         for k in self.__slots__:
             x = getattr(self, k, None)
             setattr(v, k, x.copy() if hasattr(x, "copy") else x)
+        v.outbox = []  # undelivered reports stay with the drone that made them
         return v
 
 
@@ -624,6 +629,9 @@ class GridSearchEnv(ParallelEnv):
             self.vis = np.clip(np.exp(rng.normal(0.0, sc.vis_sd, len(self.survivors))), 0.3, 2.0)
         if sc.behaviour == "mixed":
             self.people = rl.People(rng, sc, self.true_free, self.survivors, self.trapped, DIRECTED)
+        # P6: the team has only an estimate of how many people are missing (log-sd 0.4).
+        n = len(self.survivors)
+        self.n_est = max(1, int(round(n * np.exp(rng.normal(0.0, 0.4)))))
 
     def _move_real(self, a, target):
         """The drone flies the move it chose from where it thinks it is; wind
@@ -777,7 +785,7 @@ class GridSearchEnv(ParallelEnv):
         # 2. What the map does with it (modelled detector, believed position).
         Pm = self.P[alt, ey, ex]
         reward = 0.0
-        n_est = self.scenario.n_survivors
+        n_est = self.n_est  # the team's estimate, not the true count (P6)
         for oy, ox in zip(*np.nonzero(Pm)):
             mx, my = ex + ox - r, ey + oy - r
             p = Pm[oy, ox]
@@ -820,7 +828,7 @@ class GridSearchEnv(ParallelEnv):
             (len(grp) - ("base" in grp)) / MAX_DRONES,
             np.clip((v.found_low + 1.0) / (v.exp_low + 1.0), 0.0, 3.0) / 3.0,  # finds vs expected
             np.clip((v.reports + 1.0) / (v.exp_high + 1.0), 0.0, 5.0) / 5.0,  # reports vs expected
-            v.exp_low / max(1, sc.n_survivors),  # how much evidence there is
+            v.exp_low / max(1, self.n_est),  # how much evidence there is
             sc.wind_mps / 10.0,  # weather is known
             sc.gps_err * 10.0,  # so is the GPS fix quality
         ], dtype=np.float32)

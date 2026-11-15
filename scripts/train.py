@@ -47,6 +47,8 @@ def main():
                    help="find_time: each find pays more the earlier it happens (matches the metric)")
     p.add_argument("--ent-coef", type=float, default=0.01, help="exploration (entropy) bonus; 0 turns it off")
     p.add_argument("--real", action="store_true", help="M7 real-world effects (implies --camera)")
+    p.add_argument("--field", nargs="*", default=None, metavar="FAMILY",
+                   help="M8 field environment on these families (default: wilderness urban; flood is held out)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--out", default=None)
@@ -78,6 +80,11 @@ def main():
         sampler=ScenarioSampler(grid_size=a.grid, obstacle_frac=(0.0, a.obstacles), camera=a.camera,
                                 real=a.real, max_steps=CAMERA_STEPS if a.camera else 200),
     )
+    if a.field is not None:
+        from swarmsearch.field.params import FieldSampler
+        fams = a.field or ["wilderness", "urban"]
+        cfg.sampler = FieldSampler(families={f: 1.0 for f in fams})
+        cfg.reward = "find_time"
     train(cfg)
 
 

@@ -22,8 +22,10 @@ def _altitude_step(alt: int, want: int) -> int | None:
     return CLIMB if want > alt else DESCEND
 
 
-def _toward(env, a, field, tiebreak=None) -> int:
-    """Move that most reduces `field` (a distance field), ties by higher tiebreak."""
+def _toward(env, a, field, tiebreak=None, sprint: bool = False) -> int:
+    """Move that most reduces `field` (a distance field), ties by higher tiebreak.
+    With sprint (field environment), cover two cells per step while the
+    target is still far (the camera is nearly blind at that speed)."""
     mask = env.action_mask(a)
     nxt = env.pos[a] + MOVES
     best, best_key = HOVER, None
@@ -32,7 +34,20 @@ def _toward(env, a, field, tiebreak=None) -> int:
         key = (field[ny, nx], 0.0 if tiebreak is None else -tiebreak[ny, nx])
         if best_key is None or key < best_key:
             best, best_key = int(m), key
+    if sprint and best < 8:
+        x, y = (int(v) for v in env.pos[a])
+        if field[y, x] > 4 and mask[11 + best]:
+            nx, ny = x + 2 * MOVES[best][0], y + 2 * MOVES[best][1]
+            if field[ny, nx] < field[y, x] - 1:
+                return 11 + best
     return best
+
+
+def _footprint_values(env, k: int) -> np.ndarray:
+    """Expected detections over the footprint at height k from every cell."""
+    if hasattr(env, "footprint_values"):
+        return env.footprint_values(k)
+    return cam.footprint_sum(env.belief, env.P[k])
 
 
 def distance_field(free: np.ndarray, target: tuple[int, int], corner_cut: bool = True) -> np.ndarray:
@@ -71,18 +86,22 @@ class Lawnmower:
 
     def reset(self, env: GridSearchEnv):
         g = env.grid_size
+        self.sweep_alt = getattr(env, "sweep_alt", self.SWEEP_ALT)
+        rr = getattr(env, "foot_r", cam.FOOT_R)[self.sweep_alt] if env.camera else 0
+        lane = 2 * rr + 1
         strips = np.array_split(np.arange(g), len(env.agents))
         self.routes = {}
         self.tasks: dict[str, tuple[int, int]] = {}
         for a, rows in zip(env.agents, strips):
             route = []
-            if env.camera:  # lanes 3 rows apart, centred so every row is within one of a lane
-                rows = rows[1::3] if len(rows) > 1 else rows
+            if env.camera:  # lanes one footprint apart, centred so every row is within one of a lane
+                rows = rows[rr::lane] if len(rows) > 1 else rows
                 if len(rows) and rows[-1] + 1 < (strips[env.agents.index(a)][-1]):
                     rows = np.append(rows, strips[env.agents.index(a)][-1])
+            link = getattr(env, "link_mask", None)  # field: stay within radio coverage
             for i, y in enumerate(rows):
                 xs = range(g) if i % 2 == 0 else range(g - 1, -1, -1)
-                route += [(x, int(y)) for x in xs if env.free[y, x]]
+                route += [(x, int(y)) for x in xs if env.free[y, x] and (link is None or link[y, x])]
             self.routes[a] = route
         self.idx = {a: 0 for a in env.agents}
         self._fields: dict[tuple[int, int], np.ndarray] = {}
@@ -99,7 +118,7 @@ class Lawnmower:
         for a in env.agents:
             if a in out:
                 continue
-            if env.camera and (m := _altitude_step(env.alt[a], self.SWEEP_ALT)) is not None:
+            if env.camera and (m := _altitude_step(getattr(env, "alt_tgt", env.alt)[a], self.sweep_alt)) is not None:
                 out[a] = m
                 continue
             route = self.routes[a]
@@ -177,7 +196,7 @@ def _confirm_actions(env, tasks, field_of) -> dict:
     out = {}
     for a, (cx, cy) in tasks.items():
         if tuple(int(v) for v in env.pos[a]) == (cx, cy):
-            out[a] = _altitude_step(env.alt[a], 0) or HOVER
+            out[a] = _altitude_step(getattr(env, "alt_tgt", env.alt)[a], 0) or HOVER
         else:
             out[a] = _toward(env, a, field_of(env, (cx, cy)))
     return out
@@ -267,7 +286,7 @@ class BeliefGreedy:
             v = env.view_of(a)
             if id(v) not in Vs:
                 env.use_view(a)
-                Vs[id(v)] = [cam.footprint_sum(env.belief, env.P[k]) for k in range(cam.N_ALT)]
+                Vs[id(v)] = [_footprint_values(env, k) for k in range(cam.N_ALT)]
         V_of = {a: Vs[id(env.view_of(a))] for a in live}
         same = {a: [b for b in live if env.view_of(b) is env.view_of(a)] for a in live}
         for a in list(self.tasks):
@@ -299,10 +318,12 @@ class BeliefGreedy:
             for a in need:
                 V = V_of[a]
                 taken = ~env.free.copy()
+                if getattr(env, "link_mask", None) is not None:
+                    taken |= ~env.link_mask  # field: plan within radio coverage
                 for b in same[a]:
                     if b in self.cam_targets:
                         (tx, ty), k, _ = self.cam_targets[b]
-                        rr = self.r + cam.FOOT_R[k]
+                        rr = self.r + getattr(env, "foot_r", cam.FOOT_R)[k]
                         taken[max(0, ty - rr):ty + rr + 1, max(0, tx - rr):tx + rr + 1] = True
                 x, y = (int(v) for v in env.pos[a])
                 D = self._field(env, (x, y))
@@ -320,6 +341,7 @@ class BeliefGreedy:
             if a in out:
                 continue
             (tx, ty), k, _ = self.cam_targets[a]
-            m = _altitude_step(env.alt[a], k)
-            out[a] = m if m is not None else _toward(env, a, self._field(env, (tx, ty)), V_of[a][k])
+            m = _altitude_step(getattr(env, "alt_tgt", env.alt)[a], k)
+            out[a] = m if m is not None else _toward(env, a, self._field(env, (tx, ty)), V_of[a][k],
+                                                     sprint=getattr(env, "has_sprint", False))
         return out

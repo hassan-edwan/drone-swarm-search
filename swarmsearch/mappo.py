@@ -121,7 +121,7 @@ def make_body(arch: str, grid_size: int, out: int, hidden: int, tf: dict | None 
 class ActorCritic(nn.Module):
     def __init__(self, grid_size: int, centralized: bool, hidden: int = 256, arch: str = "mlp",
                  tf: dict | None = None, guided: bool = False, team: bool = False, camera: bool = False,
-                 real: bool = False):
+                 real: bool = False, field: bool = False):
         super().__init__()
         self.centralized = centralized
         self.arch = arch
@@ -132,9 +132,16 @@ class ActorCritic(nn.Module):
         self.real = real
         o = self.vec = (obs_dim() + (GUIDE_DIM if guided else 0) + (TEAM_DIM if team else 0)
                         + (CAMERA_DIM if camera else 0) + (REAL_DIM if real else 0))
-        self.actor = make_body(arch, grid_size, n_actions(camera), hidden, tf, o)
+        self.n_act = n_actions(camera)
+        self.state_in = state_dim(grid_size, camera, real)
+        self.field = field
+        if field:  # M8: its own observation, 19 actions, fixed-size critic state
+            from .field.env import FIELD_OBS_DIM, FIELD_STATE_DIM, N_ACTIONS_FIELD
+            o = self.vec = FIELD_OBS_DIM
+            self.n_act, self.state_in = N_ACTIONS_FIELD, FIELD_STATE_DIM
+        self.actor = make_body(arch, grid_size, self.n_act, hidden, tf, o)
         # MAPPO's critic gets the full global state plus the vector obs; IPPO's sees only the local obs.
-        self.critic = (mlp(o + state_dim(grid_size, camera, real), 1, hidden) if centralized
+        self.critic = (mlp(o + self.state_in, 1, hidden) if centralized
                        else make_body(arch, grid_size, 1, hidden, tf, o))
 
     def dist(self, obs: torch.Tensor, mask: torch.Tensor) -> torch.distributions.Categorical:
@@ -205,15 +212,18 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     centralized = cfg.algo == "mappo"
     guide = make_guide(cfg.guide)
     guided = guide is not None
-    envs = [GridSearchEnv(sampler=cfg.sampler, seed=int(rng.integers(1 << 31)), full_map=cfg.arch != "mlp",
-                         guided=guided, team=cfg.team)
+    from .envs import is_field, make_env
+    field = is_field(cfg.sampler)
+    envs = [make_env(sampler=cfg.sampler, seed=int(rng.integers(1 << 31)), full_map=cfg.arch != "mlp",
+                     guided=guided, team=cfg.team)
             for _ in range(cfg.n_envs)]
     for e in envs:
         e.reward = cfg.reward
     g = envs[0].grid_size
     dev = torch.device(cfg.device)
     camera, real = cfg.sampler.camera, cfg.sampler.real
-    net = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided, cfg.team, camera, real).to(dev)
+    net = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided, cfg.team, camera, real,
+                      field).to(dev)
     vec = net.vec
     T_ = lambda a: torch.from_numpy(a).to(dev)
     if cfg.init_from:
@@ -223,17 +233,17 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     anchor = None
     if cfg.bc_anchor:
         anchor = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided, cfg.team, camera,
-                             real).to(dev)
+                             real, field).to(dev)
         anchor.load_state_dict(torch.load(cfg.bc_anchor, weights_only=False, map_location="cpu")["state_dict"])
         anchor.eval()
 
     T, E, A = cfg.rollout_len, cfg.n_envs, MAX_DRONES
     o_dim = vec + (map_dim(g) if cfg.arch != "mlp" else 0)
-    c_dim = vec + state_dim(g, camera, real) if centralized else o_dim
+    c_dim = vec + net.state_in if centralized else o_dim
     buf = {
         "obs": np.zeros((T, E, A, o_dim), np.float32),
         "cin": np.zeros((T, E, A, c_dim), np.float32),
-        "mask": np.zeros((T, E, A, n_actions(camera)), np.float32),
+        "mask": np.zeros((T, E, A, net.n_act), np.float32),
         "act": np.zeros((T, E, A), np.int64),
         "logp": np.zeros((T, E, A), np.float32),
         "val": np.zeros((T, E, A), np.float32),
@@ -411,7 +421,8 @@ def load(path: str | Path) -> tuple[ActorCritic, dict]:
     arch = cfg.get("arch") or ("cnn" if cfg.get("full_map") else "mlp")
     guided = cfg.get("guide", "none") not in (None, "none")
     net = ActorCritic(cfg["sampler"]["grid_size"], cfg["algo"] == "mappo", cfg["hidden"], arch, tf_kwargs(cfg), guided,
-                       cfg.get("team", False), cfg["sampler"].get("camera", False), cfg["sampler"].get("real", False))
+                       cfg.get("team", False), cfg["sampler"].get("camera", False), cfg["sampler"].get("real", False),
+                       cfg["sampler"].get("field", False))
     net.load_state_dict(ck["state_dict"])
     net.eval()
     return net, cfg

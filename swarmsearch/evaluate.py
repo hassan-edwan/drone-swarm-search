@@ -135,8 +135,30 @@ REAL_CONDITIONS = {
     "real_all": _real(**SENSOR, **COLLAPSE, **RADIO, **POSITION, **PEOPLE),
     "real_random_mix": _sampled(obstacle_frac=(0.0, 0.3), camera=True, real=True, max_steps=CAMERA_STEPS),
 }
+# M8: field environment (swarmsearch/field). Each family drawn with every
+# effect randomised, then the hard test cases from docs/ASSUMPTIONS.md on
+# wilderness missions. Flood is held out of training (generalisation test).
+def _field(family: str, **override):
+    from .field.params import sample_scenario
+    return lambda seed: sample_scenario(np.random.default_rng(30_000 + seed), family, **override)
+
+
+FIELD_CONDITIONS = {
+    "wild_mix": _field("wilderness"),
+    "urban_mix": _field("urban"),
+    "flood_mix_heldout": _field("flood"),
+    "wild_mix_adaptive_map": _field("wilderness", adaptive_map=True),
+    "wild_hard_unresponsive": _field("wilderness", force="unresponsive"),
+    "wild_hard_evasive": _field("wilderness", force="evasive"),
+    "wild_hard_wrong_ipp": _field("wilderness", ipp_wrong=True),
+    "wild_hard_outside": _field("wilderness", force="outside"),
+    "wild_hard_weak_sensor": _field("wilderness", sensor_scale=0.4),
+    "wild_hard_late_start": _field("wilderness", hours_lost=12.0),
+    "wild_hard_radio": _field("wilderness", comm_range_m=300.0, rtb_on_link_loss=True),
+    "wild_hard_off_model": _field("wilderness", force="off_model"),
+}
 ALL_CONDITIONS = {**CONDITIONS, **SPEED_SWEEP, **M2_CONDITIONS, **M4_CONDITIONS, **M5_CONDITIONS, **CAMERA_CONDITIONS,
-                  **REAL_CONDITIONS}
+                  **REAL_CONDITIONS, **FIELD_CONDITIONS}
 
 
 def run_episode(env: GridSearchEnv, policy, scenario: Scenario, seed: int) -> dict:
@@ -156,8 +178,13 @@ def evaluate(policies: dict, conditions: dict | None = None, n_episodes: int = 5
         results[cname] = {}
         sc0 = make(0)
         g = sc0.grid_size
-        env = envs.setdefault((g, sc0.camera, sc0.real),
-                              GridSearchEnv(Scenario(grid_size=g, camera=sc0.camera, real=sc0.real)))
+        from .envs import is_field
+        if is_field(sc0):
+            from .field.env import FieldEnv
+            env = envs.setdefault("field", FieldEnv(sc0))
+        else:
+            env = envs.setdefault((g, sc0.camera, sc0.real),
+                                  GridSearchEnv(Scenario(grid_size=g, camera=sc0.camera, real=sc0.real)))
         for pname, policy in policies.items():
             rows = [run_episode(env, policy, make(s), seed=s) for s in range(n_episodes)]
             results[cname][pname] = summarise(rows, rows and make(0).max_steps)
@@ -184,10 +211,32 @@ def summarise(rows: list[dict], max_steps: int) -> dict:
         "bumps": float(np.mean([r.get("bumps", 0) for r in rows])),
         "linked": float(np.mean([r.get("linked", 1.0) for r in rows])),
         "revealed": float(np.mean([r.get("revealed", 1.0) for r in rows])),
+        **({k: float(np.mean([r[k] for r in rows])) for k in FIELD_KEYS} if rows and "rescue_time" in rows[0] else {}),
     }
 
 
+FIELD_KEYS = ("found_inside_frac", "found_by_half", "rescue_time", "rescued_frac", "outside_frac", "op_missed",
+              "crashes", "near_misses", "swaps", "minutes")
+
+
+def field_markdown(results: dict) -> str:
+    lines = ["| Condition | Method | Mean find time (steps) | Found | Found (inside area) | Found by half time | "
+             "Rescued | Mean rescue time | Coverage | Alerts (false) | Operator misses | Crashes | Linked |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for cname, per in results.items():
+        for pname, s in per.items():
+            lines.append(
+                f"| {cname} | {pname} | {s['find_time']:.0f} ± {s['find_time_se']:.0f} | {s['found_frac']:.0%} | "
+                f"{s['found_inside_frac']:.0%} | {s['found_by_half']:.0%} | {s['rescued_frac']:.0%} | "
+                f"{s['rescue_time']:.0f} | {s['coverage']:.0%} | {s['alarms']:.0f} ({s['false_alarms']:.0f}) | "
+                f"{s['op_missed']:.1f} | {s['crashes']:.2f} | {s['linked']:.2f} |")
+    return "\n".join(lines)
+
+
 def to_markdown(results: dict) -> str:
+    first = next(iter(next(iter(results.values())).values()), {}) if results else {}
+    if "rescue_time" in first:
+        return field_markdown(results)
     lines = ["| Condition | Method | Mean find time (steps) | Find time (% of budget) | Time to 90% (steps) | "
              "Reached 90% | Found | Coverage | Repeats | Collisions | Shield stops | Alarms (false) |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
