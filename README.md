@@ -41,10 +41,11 @@ swarmsearch/
   memory.py     the same with a GRU actor (memory check)
   evaluate.py   named test conditions and metrics
   sim3d.py      3D flight (PyBullet or point-mass) of the 2D mission
+  field/        M8 field environment: urban, wilderness and flood families built to docs/ASSUMPTIONS.md
 scripts/
   train.py, evaluate.py, imitate.py, imitate_gru.py, run3d.py, render_episode.py, make_figures.py
 docs/REPORT.md  results and findings
-docs/ASSUMPTIONS.md  what the simulator assumes, the evidence, and what is still open
+docs/ASSUMPTIONS.md  what the simulator assumes, the evidence, and how the field environment models it
 tests/
 ```
 
