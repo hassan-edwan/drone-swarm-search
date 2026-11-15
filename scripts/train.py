@@ -50,6 +50,8 @@ def main():
     p.add_argument("--field", nargs="*", default=None, metavar="FAMILY",
                    help="M8 field environment on these families (default: wilderness urban; flood is held out)")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--resume", action="store_true", help="continue from <out>/ckpt.pt (same command otherwise)")
+    p.add_argument("--ckpt-every", type=int, default=25, help="updates between resumable checkpoints")
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--out", default=None)
     a = p.parse_args()
@@ -77,6 +79,8 @@ def main():
         reward=a.reward,
         ent_coef=a.ent_coef,
         out_dir=a.out or f"runs/{a.algo}",
+        resume=a.resume,
+        ckpt_every=a.ckpt_every,
         sampler=ScenarioSampler(grid_size=a.grid, obstacle_frac=(0.0, a.obstacles), camera=a.camera,
                                 real=a.real, max_steps=CAMERA_STEPS if a.camera else 200),
     )

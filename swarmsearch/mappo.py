@@ -20,6 +20,7 @@ deployment.
 from __future__ import annotations
 
 import csv
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -190,6 +191,8 @@ class Config:
     reward: str = "count"  # "count" or "find_time" (see env.FIND_TIME_REWARD)
     team: bool = False  # team layers in the observation (all teammates' positions, trails, intent)
     out_dir: str = "runs/mappo"
+    ckpt_every: int = 25  # updates between resumable checkpoints (model, optimizer, counters, RNG)
+    resume: bool = False  # continue from out_dir/ckpt.pt if it exists
     sampler: ScenarioSampler = field(default_factory=ScenarioSampler)
 
 
@@ -260,14 +263,31 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
 
     out = Path(cfg.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    log_f = open(out / "train_log.csv", "w", newline="")
+    start, env_steps, secs0 = 1, 0, 0.0
+    ck_path = out / "ckpt.pt"
+    if cfg.resume and ck_path.exists():
+        ck = torch.load(ck_path, weights_only=False, map_location="cpu")
+        net.load_state_dict(ck["state_dict"])
+        opt.load_state_dict(ck["optimizer"])
+        start, env_steps, secs0 = ck["update"] + 1, ck["env_steps"], ck["secs"]
+        torch.set_rng_state(ck["torch_rng"])
+        rng.bit_generator.state = ck["np_rng"]
+        for e, st in zip(envs, ck["env_rngs"]):
+            e.rng.bit_generator.state = st
+        cur = [e.reset() for e in envs]  # episodes in flight are not saved: start fresh ones
+        print(f"resumed from {ck_path} at update {ck['update']} ({env_steps} steps)", flush=True)
+    elif cfg.resume:
+        print(f"no checkpoint at {ck_path}: starting from scratch", flush=True)
+    resumed = start > 1
+    log_f = open(out / "train_log.csv", "a" if resumed else "w", newline="")
     log = csv.writer(log_f)
-    log.writerow(["update", "env_steps", "episodes", "found_frac", "time_to_90", "coverage",
+    if not resumed:
+        log.writerow(["update", "env_steps", "episodes", "found_frac", "time_to_90", "coverage",
                   "repeat_frac", "collisions", "policy_loss", "value_loss", "entropy", "secs",
                   "guide_coef"])
 
     n_updates = cfg.total_env_steps // (T * E)
-    env_steps, t0, ep_metrics = 0, time.time(), []
+    t0, ep_metrics = time.time() - secs0, []
     def replan():
         """Query the guide for every env due a new plan; refresh their obs."""
         due = [ei for ei, e in enumerate(envs) if e.agents and e.t % cfg.guide_every == 0]
@@ -278,7 +298,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
             e, (_, infos) = envs[ei], cur[ei]
             cur[ei] = ({a: e._obs(a) for a in e.agents}, infos)
 
-    for update in range(1, n_updates + 1):
+    for update in range(start, n_updates + 1):
         for k in buf:
             buf[k].fill(0)
         if guided:
@@ -405,8 +425,24 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
             ep_metrics = []
         if update % 50 == 0 or update == n_updates:
             save(net, cfg, out / "model.pt")
+        if update % cfg.ckpt_every == 0 or update == n_updates:
+            save_checkpoint(ck_path, net, opt, cfg, update, env_steps, time.time() - t0, rng, envs)
     log_f.close()
     return net
+
+
+def save_checkpoint(path: Path, net, opt, cfg: Config, update: int, env_steps: int, secs: float, rng, envs):
+    """Everything needed to continue training exactly where it stopped (except
+    the episodes in flight). Written to a temporary file and renamed, so a
+    crash mid-write never leaves a broken checkpoint."""
+    c = asdict(cfg)
+    c["sampler"] = asdict(cfg.sampler)
+    tmp = Path(str(path) + ".tmp")
+    torch.save({"state_dict": {k: v.cpu() for k, v in net.state_dict().items()}, "optimizer": opt.state_dict(),
+                "config": c, "update": update, "env_steps": env_steps, "secs": secs,
+                "torch_rng": torch.get_rng_state(), "np_rng": rng.bit_generator.state,
+                "env_rngs": [e.rng.bit_generator.state for e in envs]}, tmp)
+    os.replace(tmp, path)
 
 
 def save(net: ActorCritic, cfg: Config, path: Path):
