@@ -1,0 +1,27 @@
+14:46  (min   0.0)  launch: 3 drones, hiker lost 5.1 h ago, day, 19 C, wind 1 m/s; person is unresponsive, behaviour 'drift'
+14:47  (min   1.1)  drone_0: holding over find (battery 97%)
+14:47  (min   1.1)  operator confirms a find -> ground team dispatched
+14:47  (min   1.4)  operator confirms a find -> ground team dispatched
+14:48  (min   2.1)  ground team reaches the person: rescued
+14:49  (min   3.5)  operator has reviewed 10 alerts (2 real ones missed), 1 waiting
+14:50  (min   3.6)  operator confirms a find -> ground team dispatched
+14:50  (min   3.6)  ground team reaches the person: rescued
+14:50  (min   4.5)  operator confirms a find -> ground team dispatched
+14:51  (min   4.8)  drone_1: holding over find (battery 85%)
+14:51  (min   4.8)  operator confirms a find -> ground team dispatched
+14:53  (min   7.5)  operator has reviewed 20 alerts (3 real ones missed), 1 waiting
+14:54  (min   8.2)  drone_2: holding over find (battery 72%)
+14:54  (min   8.2)  operator confirms a find -> ground team dispatched
+14:57  (min  10.8)  operator confirms a find -> ground team dispatched
+14:59  (min  13.1)  operator confirms a find -> ground team dispatched
+15:02  (min  15.6)  ground team reaches the person: rescued
+15:05  (min  19.4)  operator has reviewed 30 alerts (3 real ones missed), 0 waiting
+15:12  (min  25.6)  operator confirms a find -> ground team dispatched
+15:12  (min  25.8)  operator has reviewed 40 alerts (4 real ones missed), 0 waiting
+15:13  (min  27.1)  drone_0: low battery: home (battery 12%)
+15:14  (min  28.2)  drone_0: battery swap (battery 9%)
+15:14  (min  28.4)  drone_1: low battery: home (battery 14%)
+15:14  (min  28.6)  drone_2: low battery: home (battery 14%)
+15:16  (min  29.9)  drone_1: battery swap (battery 10%)
+15:16  (min  30.0)  drone_2: battery swap (battery 10%)
+15:16  (min  30.0)  end: found 64%, rescued 21%, 45 alerts (27 false), 3 battery swaps, area covered 98%

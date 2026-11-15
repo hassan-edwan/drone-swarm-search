@@ -58,7 +58,8 @@ def run(sc, seed, policy):
             drones={a: (tuple(env.true_pos[a]), env.alt[a], env.mode[a], env.battery[a], "base" in env.group_of.get(a, []))
                     for a in env.possible_agents[: sc.n_drones] if env.alive.get(a)},
             people=env.people.pos.copy(), found=env.found.copy(), outside=env.people.outside.copy(),
-            teams=[tuple(t["pos"]) for t in env.teams], nofly=env.nofly.copy(), queue=len(env.queue)))
+            teams=[tuple(t["pos"]) for t in env.teams], nofly=env.nofly.copy(), queue=len(env.queue),
+            water=env.water.copy(), smoke=env.smoke.copy(), collapsed_seen=env.collapsed & ~env.unseen))
         if not env.agents:
             break
         env.step(policy.act(env))
@@ -110,11 +111,19 @@ def main():
     shade = LightSource(315, 40).hillshade(w.elev, vert_exag=3, dx=fam.cell_m, dy=fam.cell_m)
     ax.imshow(shade, cmap="gray", vmin=0, vmax=1.2)
     ax.imshow(np.where(w.canopy > 0.05, w.canopy, np.nan), cmap="Greens", vmin=0, vmax=1.4, alpha=0.55)
-    for mask, c, s in [(w.stream, "#4f8fd6", 4), (w.trail, "#8a5a2b", 5)]:
+    feats = [(w.stream, "#4f8fd6", 4)] if sc.family != "flood" else []
+    if sc.family == "wilderness":
+        feats.append((w.trail, "#8a5a2b", 5))
+    for mask, c, s in feats:
         yy, xx = np.nonzero(mask)
         ax.scatter(xx, yy, s=s, c=c, marker="s", linewidths=0)
-    wy, wx = np.nonzero(w.water)
-    ax.scatter(wx, wy, s=14, c="#1d3f8f", marker="s", linewidths=0)
+    if w.struct_h.any():  # buildings, darker = taller; collapsed ones as rubble
+        bh = np.where(w.struct_h > 0, w.struct_h, np.nan)
+        ax.imshow(np.where(env.collapsed, np.nan, bh), cmap="Greys", vmin=0, vmax=60, alpha=0.95)
+        cy, cx = np.nonzero(env.collapsed)
+        ax.scatter(cx, cy, s=22, c="#a0522d", marker="x", linewidths=1.0)
+    water_img = ax.imshow(np.full((g, g), np.nan), cmap="Blues", vmin=0, vmax=1.2, alpha=0.75)
+    smoke_img = ax.imshow(np.full((g, g), np.nan), cmap="Greys", vmin=0, vmax=1.3, alpha=0.55)
     nofly_img = ax.imshow(np.zeros((g, g)), cmap="Reds", vmin=0, vmax=1, alpha=0.0)
     ax.scatter(*w.base, s=220, marker="*", c="#fcd116", edgecolors="k", zorder=6)
     ax.scatter(start[:, 0], start[:, 1], s=90, facecolors="none", edgecolors="#7a7975", linewidths=1.2, zorder=5)
@@ -135,7 +144,7 @@ def main():
     labels = [ax.text(0, 0, "", fontsize=7, color=COLORS[i], zorder=9, fontweight="bold") for i in range(8)]
     title = fig.text(0.5, 0.95, "", ha="center", fontsize=13)
     sub = fig.text(0.5, 0.905, "", ha="center", fontsize=10, color="#52514e")
-    fig.text(0.5, 0.012, "Shaded relief · green: forest · brown: trails · blue: drainages and water · star: base · "
+    fig.text(0.5, 0.012, "Shaded relief · green: forest · brown: trails · blue: drainages and water · grey: buildings (x: collapsed) · haze: smoke · star: base · "
              "red/green dot: person (not found / found) · grey ring: where they started\nsquares: drones "
              "(bigger = higher, outline = camera footprint) · dashed line: radio link to base · triangles: ground teams · "
              "x: reported last-seen point · diamonds: alerts waiting for a closer look",
@@ -151,9 +160,12 @@ def main():
                 f"{d.split('_')[1]}: {bat:.0%}" + (f" ({MODE.get(m, m)})" if m else "")
                 for d, (_, _, m, bat, _) in f["drones"].items()))
             heat.set_data(f["belief"])
+            heat.set_clim(0, max(float(np.quantile(f["belief"], 0.995)), 1e-9))  # relative: where the team looks next
             cy, cx = np.nonzero(f["cand"])
             cands.set_offsets(np.c_[cx, cy] if len(cx) else np.empty((0, 2)))
             nofly_img.set_data(f["nofly"].astype(float))
+            water_img.set_data(np.where(f["water"], 1.0, np.nan))
+            smoke_img.set_data(np.where(f["smoke"] > 0.05, f["smoke"], np.nan))
             nofly_img.set_alpha(0.35 if f["nofly"].any() else 0.0)
             vis = ~f["outside"]
             people.set_offsets(f["people"][vis] if vis.any() else np.empty((0, 2)))

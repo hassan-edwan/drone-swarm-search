@@ -1,339 +1,244 @@
-# Cooperative Drone Swarm Search: From a Grid World to the Field
+# Learning to Search: Cooperative Drone Swarms from Grid Worlds to Field-Realistic Missions
 
-MSML642 project, Hassan Edwan. A team of drones searches for people after a
-disaster or for someone lost in the wilderness. One shared policy, trained
-with multi-agent reinforcement learning (MAPPO), picks every drone's next
-move. This report follows the project from its first, simplest version to
-the current one, and shows how each stage made the problem and the
-environment more like the real thing, what each stage taught us, and why it
-led to the next. Setup and usage are in the [README](../README.md); what the
-simulator assumes, and the evidence for it, is in the
-[assumptions register](ASSUMPTIONS.md).
+Hassan Edwan · MSML642 · November 2026
 
-## 1. Summary
+## Abstract
 
-The project went through eight stages. Each one removed a simplification:
+We study cooperative search for missing people with a swarm of drones that
+shares a probabilistic map of where people may be and is controlled by a
+single policy trained with multi-agent proximal policy optimisation (MAPPO).
+The environment was developed in stages, each adding a feature of the real
+problem once the previous stage's goal was met: moving survivors and online
+inference of how they move, obstacles, quadrotor flight in 3D, a camera with
+flying height, occlusion and false alarms, and finally a field environment
+with real terrain, lost-person statistics, operator review of detections,
+battery logistics and radio limits. The shared map gives up to a 2× speed-up
+over a lawnmower sweep, and the learned policy matches, but does not exceed, a
+hand-written greedy rule that uses the same map. We show that this ceiling is
+largely an artefact of simulators that give the rule a correct model of the
+world: once the sensor, map and people disagree with the drones' model, the
+rule degrades below a plain sweep. A field environment built to an explicit
+register of assumptions makes realistic wilderness search hard for both
+baselines (about a quarter of missions succeed), and sets up the problem for
+large-scale training.
 
-| Stage | What the world gained | What we learned |
+## 1 Introduction
+
+Drones are now routine in search and rescue, but deciding where a team of
+drones should look, as evidence accumulates, is still done by hand or by
+fixed patterns. Search theory gives the right object, a probability map
+updated by Bayes' rule as areas are searched [1, 2], and lost-person research
+gives the priors [3]. Reinforcement learning offers a way to turn such a map
+into coordinated moves for many drones.
+
+This project asked whether a learned multi-agent policy can search faster than
+fixed strategies, and then progressively asked the question in harder and more
+realistic settings. Each stage was kept as simple as possible until its goal
+was met. When the learned policy reached the level of a strong rule but not
+beyond, we examined what the simulator assumed, found that it favoured the
+rule, replaced those assumptions with ones grounded in search-and-rescue
+research, and built an environment realistic enough to be the target of
+future large-scale training. Section 2 describes how the environment evolved,
+Section 3 the methods, Section 4 the results at each stage, and Section 5 what
+they mean.
+
+## 2 Environment
+
+The environment evolved in eight stages (Table 1). All share the same
+interface: each drone picks a move every step, a shared map of where people
+may be is updated from what the drones see, and the mission is scored by how
+quickly people are found.
+
+**Table 1.** Stages of the environment.
+
+| Stage | Added | World |
 |---|---|---|
-| **M1** Grid search | 2D grid, 2–8 drones, survivors that stay, wander, drift or walk to safety; a shared probability map; online inference of how survivors move | The map, not the learning, is what makes search fast: up to 2× faster than a lawnmower sweep when survivors move predictably |
-| **M2** Obstacles | Buildings and rubble on 0–30% of the map | The same gains hold with obstacles |
-| **M3–M4** 3D flight | Quadrotors flown in PyBullet by PID, wind gusts, tall buildings | The policy flies: 3D matches 2D in calm air and holds up to ~2 m/s² gusts |
-| **M5** Generality | A find-time metric, a strong hand-written rule on the same map, bigger maps and teams | The learned policy matches the rule but does not beat it; lookahead, imitation, team awareness and memory all hit the same ceiling. The ceiling is information, not learning |
-| **M6** Camera | Flying height, footprints, line of sight, cover, false alarms, light | Rewards must match the goal: RL first learned to hover high and find no one, then to search slowly low down; only a copy of the rule reaches the rule |
-| **M7** Real-world gaps | The world disagrees with the drones' model: weaker sensors, unknown collapses, radio limits, wind and GPS error, people who follow no pattern | The rule is fragile: with every gap at once it is slower than a plain sweep. This is where learning should help |
-| **Register** | A list of every assumption, with evidence from lost-person research and field trials | Most assumptions about the person were optimistic: many people do not respond to searchers, some hide, phones rarely help |
-| **M8** Field | Three scenario families (urban collapse, wilderness, flood) built to the register: real terrain, ISRID lost-person data, people who react or hide, an operator who reviews every detection, batteries and swaps, radio over terrain, ground teams | A realistic wilderness search is hard: one hiker in up to 135 km² with 2–4 drones in 90 minutes. Both baselines find the person in about a quarter of missions |
+| M1 | Moving survivors, inference of their movement, safety shield | 20 × 20 grid of 10 m cells; 2–8 drones; 1–20 survivors still, wandering, drifting or walking to a safe point |
+| M2 | Obstacles | 0–30% of cells blocked |
+| M3–M4 | 3D flight | Crazyflie quadrotors in PyBullet [7] under PID control, wind gusts, buildings taller than the drones |
+| M5 | Evaluation | Find-time metric, hand-written baseline, larger grids and teams |
+| M6 | Camera | Three flying heights with wider but weaker views, line of sight past buildings, rubble and canopy, false alarms confirmed by a low pass, day/dusk/thermal sensors |
+| M7 | Model mismatch | True detection 0.4–1.1× the modelled one, unseen collapses, radio-limited map sharing, wind and GPS error, per-person behaviour |
+| — | Assumptions register | 46 assumptions checked against 22 sources (`docs/ASSUMPTIONS.md`) |
+| M8 | Field environment | Urban, wilderness and flood families; real terrain or imported map data; ISRID lost-person statistics [3–5]; operator review; batteries and swaps; terrain-limited radio; ground teams |
 
-Three findings run through every stage:
+M1–M5 grew the problem only as far as needed to test each claim. M6 replaced
+the idealised camera. M7 and the register removed assumptions under which the
+drones' model of the world was always correct. M8 rebuilt the environment
+around evidence: the wilderness search area is sized to the subject
+category's 75% distance in ISRID (3.8 km across for dementia, 11.6 km for a
+hiker) [3–5]; people may not respond to searchers or may hide [3, 6];
+detections are reviewed by an operator before they count; looks from the same
+direction are correlated [10]; and a mission lasts 90 minutes with battery
+swaps. Every number in M8 is labelled as published, fitted or assumed.
 
-1. **What the drones know matters more than how they decide.** A shared,
-   up-to-date probability map gives most of the gain. Learning matches a good
-   rule on that map and cannot pass it while the map is right (M1–M5).
-2. **A hand-written rule is only as good as its model of the world.** When the
-   simulator gives the rule exactly what it assumes, it is near-optimal. When
-   the world disagrees with it (M7, M8), it degrades, sometimes below a sweep.
-   That gap is where a learned, adaptive policy has room to win.
-3. **Each step towards realism changed the answer.** Camera geometry exposed
-   reward design problems; real-world gaps reversed the ranking of the
-   baselines; real lost-person data changed the size of the search area by
-   a factor of three.
+## 3 Methods
 
-## 2. M1: the grid search problem
+**Shared map.** The team keeps, for each cell, the expected share of
+undetected people there. A look lowers a cell by the modelled detection
+probability; each step the map is propagated with a movement model. When the
+movement is unknown, the map is a mixture over movement hypotheses whose
+weights are updated by Bayes' rule from searches and finds [1, 2]. In M8 the
+map also tracks the probability that the person has left the area, and the
+reduction from repeated looks depends on the viewing direction.
 
-**The world.** A 20×20 grid of 10 m cells (200 m square), one step ≈ 1 s.
-2–8 drones, each moving to one of 8 neighbours or hovering; one may fail
-mid-mission. 1–20 survivors who stay put, wander, drift one way (flood
-water) or walk to a safe point at 0.3–1.5 m/s. In 40% of missions there are
-likely zones (50–100% accurate). The camera finds a survivor in the cell
-below with probability 0.6–1.0 per pass. A safety shield resolves
-conflicting moves so drones never collide.
+**Policy.** A shared actor and a centralised critic trained with MAPPO [8];
+each drone observes local windows of the map, a coarse summary, its teammates
+and mission state, so the policy is independent of map size and team size.
+The reward is the probability mass a drone's search clears plus a bonus per
+find; from M6 on, the find bonus is proportional to how early the find
+happens, so total reward equals the evaluation metric.
 
-**The shared probability map.** The team keeps the expected number of
-undetected survivors in each cell. Searching a cell lowers it by the
-detection chance; each step the map moves the way survivors move. When
-nobody tells the team how survivors move, it tracks 116 movement hypotheses
-and reweights them after every search, so it works out during the search
-whether people are still, drifting or heading somewhere.
+**Baselines.** A lawnmower sweep, and a *belief-greedy rule* that sends each
+drone to the most valuable cell (or, with a camera, cell and height) per unit
+of travel on the same map, avoiding teammates' targets. We also trained
+copies of the rule by behaviour cloning and DAgger [9], and fine-tuned them
+with RL.
 
-**The policy.** MAPPO: one shared actor, a centralised critic that sees the
-whole state in training only, 2M steps per model on 4 CPU cores. Each drone
-sees 5×5 windows of the map, a coarse summary, its teammates and the
-inferred movement (167 values, independent of grid size).
+**Metric.** Mean time to find a person, with anyone not found counted as the
+mission length; M8 also reports rescue time and the share found.
 
-**What we tried along the way.** IPPO (no centralised critic) learned about
-as well as MAPPO; a full-map CNN actor and a transformer actor were built but
-not needed; an LLM planner that picked regions for the drones was tried and
-dropped in favour of the map. Survivors that move, and inferring how they
-move, turned out to be the core of the problem.
+## 4 Results
 
-**Result.** With predictable movement the map-based policy is far ahead of a
-lawnmower sweep; with still or randomly wandering survivors and no likely
-zones, nothing beats a sweep (it is pure coverage). Full numbers in §6.
+**Grid search (M1–M2).** With predictable movement the map-based policy finds
+survivors in about half the sweep's time (Table 2, Figure 1). With still or
+randomly wandering survivors and no prior, all methods tie: the problem is
+pure coverage. Inferring movement online recovers part of the gap when the
+team is not told how people move.
 
-![MAPPO and lawnmower over the first 60 steps of the same mission](../results/figures/episode_mappo.png)
+**Table 2.** Mean time to find a survivor, % of the mission (lower is better;
+100 missions; ±1).
 
-*MAPPO on "survivors walk to a known safe point": the drones converge on where
-survivors are heading instead of sweeping.*
-
-## 3. M2: obstacles
-
-Blocks of 1–4 cells (buildings, rubble, water) on up to 30% of the map.
-Survivors route around them, and the map's movement model does too. The M2
-model is fine-tuned from M1. The gains carry over: with 20% blocked and
-survivors walking to an untold safe point, find time is 35% of the budget
-against the sweep's 50%.
-
-## 4. M3–M4: flying it in 3D
-
-Each policy step is flown by Crazyflie quadrotors in PyBullet with a PID
-controller, one height layer per drone; a drone that has not reached its
-cell in time does not search that step. M4 adds buildings taller than the
-drones, with no diagonal moves past corners.
-
-- In calm air the 3D missions reproduce the 2D results exactly (tracking
-  error about 1 cm), with no building hits.
-- Up to 2 m/s² gusts, fewer than 2% of moves arrive late; at 3 m/s² flight
-  breaks down. The limit is the controller, not the search.
-
-![Late moves and crashes against gust strength](../results/figures/wind.png)
-
-**What it showed:** the search layer and the flight layer can be built
-separately. The policy chooses "go to this cell", and a controller flies it,
-so a learned flight controller can later replace PID behind the same
-interface.
-
-## 5. M5: does learning add anything?
-
-To judge the learned policy fairly, M5 added a sharper metric (mean time to
-find a survivor, with anyone not found counted as the whole budget) and a
-strong hand-written baseline: the **belief-greedy rule**, which sends each
-drone to the most valuable cell on the same map per unit of travel, avoiding
-teammates' targets.
-
-**The policy matched the rule but did not beat it.** Four ideas were tested,
-each aimed at one possible cause:
-
-| Idea | Hypothesis | Result |
-|---|---|---|
-| Run-time lookahead | The policy is close but noisy | 0–7 steps better; within noise |
-| Imitate the rule, then RL | RL from scratch lands in a worse optimum | RL improved the copy to the same level, not past the rule |
-| Team layers (all teammates' trails and headings) | Drones lack teammate information | No change |
-| Memory (GRU) | The rule keeps a target across steps | A small gain |
-
-**What it showed:** every route converges to the same level. The bottleneck
-was what the drones could know, not how the policy was trained, which
-pointed the project at the world instead of the algorithm.
-
-The policy did generalise without retraining: 20–38% faster than the sweep on
-30×30 and 40×40 grids, and ahead of the rule on the hardest condition tested
-(40×40, destination unknown; suggestive, ±25 steps).
-
-## 6. Results of the grid stages (M1–M5)
-
-Mean time to find a survivor, as a share of the mission budget (lower is
-better); 100 missions per condition, ±1 point.
-
-![Mean time to find a survivor per condition](../results/figures/find_time.png)
-
-| Condition | MAPPO | Belief-greedy | Lawnmower |
+| Condition | MAPPO | Rule | Sweep |
 |---|---|---|---|
-| Still | 48% | 48% | 48% |
-| Wandering | 55% | 57% | 57% |
-| Drift, told | 43% | 42% | 53% |
-| Drift, not told | 51% | 51% | 53% |
-| To safety, told | 27% | 26% | 56% |
-| To safety, not told | 45% | 44% | 56% |
-| Likely zones | 36% | 34% | 53% |
-| Drone lost | 60% | 60% | 59% |
-| 6 drones | 28% | 26% | 30% |
-| Random mix | 36% | 34% | 42% |
-| 20% blocked, drift not told | 41% | 39% | 48% |
-| 20% blocked, to safety not told | 35% | 35% | 50% |
-| 30% blocked, wandering | 45% | 44% | 49% |
-| Random mix with obstacles | 32% | 30% | 42% |
+| Still | 48 | 48 | 48 |
+| Walking to safety, target told | 27 | 26 | 56 |
+| Walking to safety, not told | 45 | 44 | 56 |
+| Likely zones | 36 | 34 | 53 |
+| Random mix with obstacles | 32 | 30 | 42 |
 
-![Find time on other grid and team sizes](../results/figures/sizes.png)
+![Figure 1](../results/figures/all_models_frame.png)
 
-Video of one mission flown by eight methods:
-[`results/figures/all_models.mp4`](../results/figures/all_models.mp4); the same
-kind of mission flown in 3D: [`results/figures/flight_3d.mp4`](../results/figures/flight_3d.mp4).
+**Figure 1.** Grid world with obstacles: one mission flown by eight methods;
+heat is the team's map. [Video](../results/figures/all_models.mp4).
 
-![Frame from the 2D comparison video](../results/figures/all_models_frame.png)
+**Flight (M3–M4).** Flown by quadrotors in PyBullet, the 3D missions reproduce
+the 2D results in calm air and hold up to about 2 m/s² gusts (Figure 2), so
+search and flight can be developed separately.
 
-## 7. M6: a real camera
+![Figure 2](../results/figures/flight_3d_frame.png)
 
-The grid stages assumed a camera that sees exactly the cell below with a
-fixed chance. M6 replaced it with five effects a real search drone faces:
+**Figure 2.** The same kind of mission flown in 3D. [Video](../results/figures/flight_3d.mp4).
 
-| Effect | Model |
-|---|---|
-| Flying height | Climb and descend actions. Low (15 m) sees 1 cell, mid 3×3, high 5×5; detection falls with height and off-centre |
-| Line of sight | Buildings 10–50 m tall hide what is behind them |
-| Cover | Rubble and tree canopy lower detection |
-| False alarms | From mid or high, a detection is only a candidate; a low pass confirms it |
-| Light and sensor | Day, dusk, night thermal, midday thermal |
+**The learning ceiling (M5).** The learned policy matched the rule within
+noise on every condition. Run-time lookahead, imitation followed by RL,
+teammate trails and headings, and a recurrent actor all reached the same
+level; copies of the rule disagreed with it on 45% of moves yet performed the
+same, indicating many near-equivalent choices. The bottleneck was the
+information in the map, not the policy.
 
-**Lesson 1, reward hacking.** The first RL run reached 95% coverage and found
-nobody: drones stayed high and collected the reward for clearing empty ground
-over the wide footprint, never coming down to confirm.
+**Camera (M6).** Camera geometry exposed reward design problems. The first RL
+policy covered 95% of the ground and found no one by hovering high to collect
+the clearing reward; after capping that reward, the from-scratch policy
+earned more training reward than the rule while being slower. A copy of the
+rule matched the rule (random mix: 49 vs 51 steps, 78% found); RL from
+scratch and RL fine-tuning reached 58–63 steps. A reward equal to the
+find-time metric removed the misalignment; the remaining gap traces to RL
+learning from sampled rather than greedy actions, and a run from a sharpened
+copy is in progress (Figure 3).
 
-**Lesson 2, the reward must be the goal.** After capping the high-altitude
-reward, three policies were trained (100 missions per condition; find time
-in steps of 100 / share found):
+![Figure 3](../results/figures/camera_models_frame.png)
 
-| Condition | Sweep | Rule | From scratch | Copy of the rule | Copy + RL |
-|---|---|---|---|---|---|
-| Open ground | 48 / 88% | 46 / 87% | 75 / 45% | **44 / 88%** | 74 / 45% |
-| City, survivors head to safety | 54 / 80% | 47 / 87% | 64 / 67% | **46 / 84%** | 65 / 64% |
-| Night, thermal | 58 / 77% | 51 / 84% | 66 / 66% | **50 / 81%** | 68 / 62% |
-| Random mix | 55 / 71% | 51 / 78% | 58 / 65% | **49 / 78%** | 63 / 57% |
+**Figure 3.** Camera world: drones choose a height (larger squares fly higher;
+outlines are footprints) and confirm candidate detections (diamonds).
+[Video](../results/figures/camera_models.mp4).
 
-Only the copy of the rule reached the rule. Scoring every policy under the
-training reward showed why RL drifted away: the slower from-scratch policy
-earned *more* reward than the rule (127 vs 108), by farming the reward for
-low passes. The training reward and the goal disagreed.
+**Model mismatch (M7).** Until M6 the drones' model of the world was exact.
+Introducing gaps one at a time (Table 3) shows the rule's dependence on its
+model: with a sensor weaker than assumed it marks unsearched areas as
+cleared and never returns, falling behind the sweep; with all gaps together
+the sweep is faster (Figure 4).
 
-**Fix: a find-time reward.** Each find now pays 20 × (1 − time / mission
-length), so the total reward is exactly the find-time metric. Offline, the
-rule now scores highest, as it should. The fine-tune kept the rule's routine
-(94–98% coverage instead of 68%) but stayed slower than the copy (random mix
-57 / 68% vs 49 / 78%). This time the training was at fault: the copy is good
-only when it takes its top action, and RL learns from sampled actions. A run
-starting from a sharpened copy, with no exploration bonus, is in progress.
+**Table 3.** Find time (steps of 100) / share found; 12 missions each.
 
-![All camera methods on one mission](../results/figures/camera_models_frame.png)
-
-*Video: [`results/figures/camera_models.mp4`](../results/figures/camera_models.mp4).*
-
-## 8. M7: when the world disagrees with the drones' model
-
-Every earlier stage gave the drones a correct model of the world. M7 broke
-that, one effect at a time (all optional, built on the camera world):
-
-| Gap | What changes |
-|---|---|
-| Sensor | True detection 0.4–1.1× what the map assumes; people differ in visibility; false alarms 0.5–3× |
-| Map | Buildings have collapsed into rubble that holds trapped people; unknown until seen |
-| Radio | Each connected group shares a map; groups merge maps when they meet |
-| Position | Wind pushes drones off their cell; GPS is sometimes a cell off |
-| People | Each person behaves differently; the operator's hint covers only the main behaviour |
-
-First check (12 missions each; mean find time in steps / found):
-
-| Gap on | Sweep | Rule |
+| Gap | Sweep | Rule |
 |---|---|---|
-| None | 56 / 82% | **49 / 88%** |
-| Weaker sensor than assumed | **72 / 59%** | 74 / 52% |
-| Unknown collapses | 61 / 68% | **55 / 74%** |
-| Limited radio | 60 / 71% | **53 / 80%** |
-| All five | **76 / 45%** | 79 / 42% |
+| None | 56 / 82% | 49 / 88% |
+| Weaker sensor than modelled | 72 / 59% | 74 / 52% |
+| All five gaps | 76 / 45% | 79 / 42% |
 
-**What it showed:** the rule trusts its map. With a weaker sensor than it
-assumes, it marks areas as searched that were not and never returns, and it
-falls behind a plain sweep. This is the first setting where a policy that
-adapts to evidence has a clear reason to win.
+![Figure 4](../results/figures/real_gaps_frame.png)
 
-## 9. The assumptions register
+**Figure 4.** Model mismatch: sweep and rule on the same mission with every
+gap switched on. [Video](../results/figures/real_gaps.mp4).
 
-Before building further, every assumption the simulator made was listed with
-the evidence for it ([docs/ASSUMPTIONS.md](ASSUMPTIONS.md), 46 items, 22
-sources). The research changed several of them:
+**Field environment (M8).** In the wilderness family, one person may be
+anywhere in up to 135 km² of forest. In a sample of 12 missions the rule and
+the sweep each found the person in 3; a typical success (Figure 5a) takes
+two rounds of battery swaps, during which the rule sends every drone home at
+once, and a ground team reaches the person half an hour after the find. The
+urban family (Figure 5b) is dominated by trapped people in unseen collapses
+and by operator load (about 100 detections per 30 minutes, most false); in
+the flood family (Figure 5c), held out of training, people drift with rising
+water and many leave the area before they are found. The evaluation on all
+twelve field conditions, including eight hard cases (unresponsive and
+evasive people, a wrong last-seen point, a person outside the area, a weak
+sensor, a late start, radio dead zones, unmodelled behaviour), is pending.
 
-- **People do not always want to be found.** Only 1% of dementia subjects
-  respond to shouts; children aged 7–12 often hide from searchers; some
-  subjects are evasive, unconscious or dead. A strategy must work without
-  any help from the person.
-- **Phones rarely help**, so a phone ping can only ever be a bonus.
-- **Looks are not independent.** Under canopy, a person hidden from one angle
-  stays hidden from that angle; a new angle is a new chance.
-- **A detection is not a find.** A person reviews the video, with delays and
-  misses; in field trials this human step was the bottleneck.
-- **People can leave the search area**, and planners always keep some
-  probability for that.
+![Figure 5a](../results/figures/field_wilderness_frame.png)
 
-The register also records which numbers are published, fitted or assumed, and
-what a field test should measure to calibrate them.
+**Figure 5.** Field environment, belief-greedy rule. (a) Wilderness: a hiker
+on an 11.6 km map sized from ISRID data. [Video](../results/figures/field_wilderness.mp4).
+(b) Urban collapse with smoke. [Video](../results/figures/field_urban.mp4).
+(c) Flood with rising water. [Video](../results/figures/field_flood.mp4).
 
-## 10. M8: the field environment
+## 5 Discussion
 
-M8 rebuilt the simulator around the register, as scenario families that share
-one set of mechanics: **urban collapse**, **wilderness lost person**, and
-**flood** (held out of training, to test generalisation).
+Three observations hold across the stages. First, the information a team
+holds matters more than how it acts on it: a shared probability map accounts
+for most of the gain over a sweep, and learning on top of a correct map
+reaches but does not pass a well-designed rule. Second, the strength of a
+hand-written rule is conditional on its model; when the world departs from
+the model, as it does in every real search, the rule has no mechanism to
+notice and can fall below a model-free sweep. This is the regime in which a
+learned policy that conditions on evidence, such as finds against
+expectations or time out of radio contact, has room to improve. Third, each
+step towards realism changed the conclusions: camera geometry revealed reward
+misspecification, model mismatch reversed the ranking of the baselines, and
+real lost-person data tripled the size of the search area.
 
-| Area | What M8 models |
-|---|---|
-| Terrain | Ridges and valleys, drainages, trails, forest density, cliffs; or a real site from elevation, canopy, trail and water data |
-| Lost-person data (ISRID) | Distance from the last-seen point by category (hiker 1.1/3.1/5.8/11.3 km at 25/50/75/95%; children 0.3/0.9/2.4/11.3; dementia 0.3/0.8/1.9/8.3), spread around the direction of travel, terrain multipliers (trails 5×, streams 2×), time spent moving, survival curves |
-| Search area | 64 × 64 cells sized per mission to the category's 75% distance: 3.8 km across for dementia, 11.6 km for a hiker |
-| The person | Unresponsive, signals when a drone is near, or hides; posture, clothing, warmth; may be injured, stop for good, or leave the area |
-| What the team knows | A last-seen point that can be off or wrong; an estimated head count; a trail map with gaps |
-| Finding | Ordinary and thermal cameras by time of day and temperature; correlated looks by viewing direction; false alarms from animals and sun-heated rock; an operator who reviews every detection |
-| Flying | Batteries of 35–55 min with automatic return and swaps; climb time; hover, cruise or sprint; link-loss return; gusts; failures; no-fly zones |
-| Radio | 2–10 km in the open, cut by terrain; each disconnected group keeps its own map |
-| Operations | A drone holds over a find; ground teams walk to the person; rescue time is measured, not only find time |
+**Limitations.** Some field parameters are fitted or assumed rather than
+published (hunter and despondent distances, detection and operator rates);
+each is marked in the register with the field measurement that would
+calibrate it. All training ran on four CPU cores with one seed per model.
 
-**One mission** ([video](../results/figures/field_wilderness.mp4)): a hiker
-lost for 10 hours, 4 drones at dusk in 9 m/s wind, on an 11.6 km map. All
-four drones returned for batteries at the same time, twice, leaving no one
-searching for about 7 minutes each time. The operator confirmed a find at
-minute 50; a ground team reached the hiker at minute 79. 6 alerts, 5 false;
-6% of the area covered.
+## 6 Conclusion and Future Work
 
-![A wilderness mission on the ISRID-sized map](../results/figures/field_wilderness_frame.png)
+Starting from a grid world, we extended the problem until a learned swarm
+matched a strong rule, identified the simulator assumptions that made the
+rule hard to beat, replaced them with evidence-based models, and built a
+field environment in which realistic search is hard for both baselines. The
+next step is training at scale in that environment: imitation of the rule
+followed by RL with the find-time reward across the urban and wilderness
+families, evaluated on the hard cases and on the held-out flood family, with
+several seeds. That requires substantially more compute than was available
+here. Field calibration of detection, operator and radio parameters at a test
+site, and a learned flight controller behind the same waypoint interface,
+follow.
 
-**How hard it is.** On 12 sample wilderness missions, the rule and the sweep
-each found the person in 3. That is not because people start outside the
-area (only 2 of 12 did, once the area was sized from the data); it is because
-one person can be anywhere in up to 135 km² of forest. Gaps like the
-simultaneous battery returns are the kind of thing a learned policy could
-fix. The full baseline evaluation on 12 field conditions, including the eight
-hard test cases (an unresponsive or evasive person, a wrong last-seen point,
-a person outside the area, a weak sensor, a late start, radio dead zones,
-behaviour that matches no model), is queued.
+## References
 
-## 11. How the problem grew
+1. B. O. Koopman. *Search and Screening: General Principles with Historical Applications.* Pergamon, 1980.
+2. L. D. Stone. *Theory of Optimal Search.* Academic Press, 1975.
+3. R. J. Koester. *Lost Person Behavior: A Search and Rescue Guide on Where to Look.* dbS Productions, 2008.
+4. R. J. Koester et al. Autism spectrum disorder and typically developing children: lost person behavior (ISRID). *Journal of Search & Rescue* 4(1), 2020.
+5. A pragmatic approach to applied search theory. *Journal of Search & Rescue* 4(1), 2020.
+6. M. A. Goodrich et al. Supporting wilderness search and rescue using a camera-equipped mini UAV. *Journal of Field Robotics* 25, 2008.
+7. J. Panerati et al. Learning to fly: a Gym environment with PyBullet physics for reinforcement learning of multi-agent quadcopter control. *IROS*, 2021.
+8. C. Yu et al. The surprising effectiveness of PPO in cooperative multi-agent games. *NeurIPS Datasets and Benchmarks*, 2022.
+9. S. Ross, G. Gordon, J. A. Bagnell. A reduction of imitation learning and structured prediction to no-regret online learning. *AISTATS*, 2011.
+10. D. C. Schedl, I. Kurmi, O. Bimber. An autonomous drone for search and rescue in forests using airborne optical sectioning. *Science Robotics* 6(55), 2021.
+11. L. Lin, M. A. Goodrich. A Bayesian approach to modeling lost person behaviors based on terrain features in wilderness search and rescue. *Computational and Mathematical Organization Theory* 16(3), 2010.
+12. M. Jacobs. Terrain based probability models for SAR. Mountain Rescue Association, 2016.
 
-| | M1 | M6 | M8 wilderness |
-|---|---|---|---|
-| Area | 200 m | 200 m | 3.8–11.6 km |
-| Mission | 200 s | 100 s | 90 min, battery swaps |
-| What is searched for | 1–20 survivors, 4 movement types | same | one person (sometimes a group) from 5 categories of real lost-person data |
-| Camera | the cell below | 3 heights, line of sight, cover, false alarms | dual camera, terrain, correlated looks, an operator |
-| What the team knows | the true model | the true model | an imperfect model of everything |
-| Radio | perfect | perfect | terrain-limited, groups |
-| Success | about 80% found | about 80% found | about 25% found in sample missions |
-
-Each step made the simulated mission more like a real one and the problem
-harder, and each changed which method looked best.
-
-## 12. Limitations and next steps
-
-- **Calibration.** Some numbers in M8 are fitted or assumed (hunter and
-  despondent distances, detection and false-alarm rates, operator
-  performance). The register marks each one and says what a field test
-  should measure.
-- **Compute.** 4 CPU cores: 2M steps and one seed per model. M8 missions are
-  several times longer than earlier ones.
-- **Learning in M8.** No policy has been trained on the field environment
-  yet. The next steps are the baseline evaluation (queued), then imitation of
-  the rule and RL fine-tuning with the find-time reward, and a test on the
-  held-out flood family.
-- **Flight.** PID control; a learned controller can come later behind the
-  same waypoint interface.
-
-## 13. Reproducing
-
-```bash
-pip install -r requirements.txt && python -m pytest          # 84 tests
-python scripts/train.py --algo mappo --steps 2000000 --out runs/m1            # M1
-python scripts/train.py --algo mappo --obstacles 0.3 --init runs/m1/model.pt --out runs/m2
-python scripts/evaluate.py --models models/m2_2m.pt --m5 --episodes 100 --out results/m5
-python scripts/run3d.py --model models/m2_2m.pt --backend pybullet --episodes 20   # M3-M4, needs requirements-3d.txt
-python scripts/imitate.py --obstacles 0.3 --out models/bc_greedy.pt               # M5 imitation
-python scripts/train.py --camera --obstacles 0.3 --reward find_time --out runs/cam # M6
-python scripts/evaluate.py --real --out results/m7                                # M7
-python scripts/evaluate.py --field --episodes 50 --out results/m8                 # M8 baselines
-python scripts/render_field.py --condition wild_mix --seed 4                       # M8 mission video
-python scripts/import_site.py --dem dem.tif --canopy canopy.tif --trails trails.geojson --ipp COL ROW --out sites/site.npz
-```
+Reproduction commands, the full result tables and the assumptions register are in the repository (`README.md`, `results/`, `docs/ASSUMPTIONS.md`).
