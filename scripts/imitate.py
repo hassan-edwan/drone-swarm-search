@@ -37,6 +37,10 @@ def main():
                    help="team layers in the observation (all teammates' positions, trails, intent)")
     p.add_argument("--camera", action="store_true", help="M6 camera mode (100-step missions)")
     p.add_argument("--real", action="store_true", help="M7 real-world effects (implies --camera)")
+    p.add_argument("--expand-share", type=float, default=0.0,
+                   help="field: share of wilderness missions whose search area can grow (K2)")
+    p.add_argument("--long-share", type=float, default=0.0,
+                   help="field: share of wilderness missions run as 4-hour operations")
     p.add_argument("--field", nargs="*", default=None, metavar="FAMILY",
                    help="M8 field environment on these families (default: wilderness urban)")
     p.add_argument("--out", default="models/bc_greedy.pt")
@@ -48,7 +52,8 @@ def main():
                               max_steps=CAMERA_STEPS if a.camera else 200)
     if a.field is not None:
         from swarmsearch.field.params import FieldSampler
-        sampler = FieldSampler(families={f: 1.0 for f in (a.field or ["wilderness", "urban"])})
+        sampler = FieldSampler(families={f: 1.0 for f in (a.field or ["wilderness", "urban"])},
+                               expand_share=a.expand_share, long_share=a.long_share)
     cfg = Config(sampler=sampler, seed=a.seed, out_dir=str(Path(a.out).parent), team=a.team)
     net = ActorCritic(sampler.grid_size, True, cfg.hidden, team=a.team, camera=a.camera, real=a.real,
                       field=a.field is not None)

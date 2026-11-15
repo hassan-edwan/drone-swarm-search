@@ -47,6 +47,10 @@ def main():
                    help="find_time: each find pays more the earlier it happens (matches the metric)")
     p.add_argument("--ent-coef", type=float, default=0.01, help="exploration (entropy) bonus; 0 turns it off")
     p.add_argument("--real", action="store_true", help="M7 real-world effects (implies --camera)")
+    p.add_argument("--expand-share", type=float, default=0.0,
+                   help="field: share of wilderness missions whose search area can grow (K2)")
+    p.add_argument("--long-share", type=float, default=0.0,
+                   help="field: share of wilderness missions run as 4-hour operations")
     p.add_argument("--field", nargs="*", default=None, metavar="FAMILY",
                    help="M8 field environment on these families (default: wilderness urban; flood is held out)")
     p.add_argument("--seed", type=int, default=0)
@@ -89,7 +93,8 @@ def main():
     if a.field is not None:
         from swarmsearch.field.params import FieldSampler
         fams = a.field or ["wilderness", "urban"]
-        cfg.sampler = FieldSampler(families={f: 1.0 for f in fams})
+        cfg.sampler = FieldSampler(families={f: 1.0 for f in fams}, expand_share=a.expand_share,
+                                    long_share=a.long_share)
         cfg.reward = "find_time"
     train(cfg)
 

@@ -25,7 +25,8 @@ realism (camera, real-world gaps, lost-person data) changed the answer.
 | M5 | Generality and search speed: find-time metric, belief-greedy baseline, larger grids and other team sizes, imitation + RL, team layers, memory | Done (`results/m5`) |
 | M6 | Camera: flying height, line of sight, cover, false alarms, light; find-time reward | Done (`results/m6`) |
 | M7 | Real-world gaps: sensor mismatch, unknown collapses, radio, position error, mixed behaviour | Done (`swarmsearch/realism.py`) |
-| M8 | Field environment (urban, wilderness, flood) built to [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md), with ISRID lost-person data | Built; evaluation queued |
+| M8 | Field environment (urban, wilderness, flood) built to [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md), with ISRID lost-person data; growing search area | Done (`results/m8`): learned policy matches the rule |
+| Phase 2 | Scale-up: mission suite ([docs/MISSIONS.md](docs/MISSIONS.md)), worker processes, resumable training, cluster pipeline ([docs/PHASE2.md](docs/PHASE2.md)) | Ready to run |
 
 ## Layout
 
@@ -44,10 +45,13 @@ swarmsearch/
   evaluate.py   named test conditions and metrics
   sim3d.py      3D flight (PyBullet or point-mass) of the 2D mission
   field/        M8 field environment: urban, wilderness and flood families built to docs/ASSUMPTIONS.md
+  vec.py        training missions in worker processes
 scripts/
   train.py, evaluate.py, imitate.py, imitate_gru.py, run3d.py, render_episode.py, make_figures.py
 docs/REPORT.md  results and findings
 docs/ASSUMPTIONS.md  what the simulator assumes, the evidence, and how the field environment models it
+docs/MISSIONS.md     the evaluation missions and what each tests
+docs/PHASE2.md       running at scale: pipeline, cluster scripts, sizing
 tests/
 ```
 
@@ -123,7 +127,10 @@ the true reward and can override the guide.
 
 ## Running on an HPC cluster (Slurm, e.g. Zaratan)
 
-See the header of `scripts/hpc/train.sbatch` for one-time setup, then:
+Phase 2 (field environment at scale): see [docs/PHASE2.md](docs/PHASE2.md) and
+`scripts/cluster/` (`setup.sh`, then `submit.sh --account=...`).
+
+Earlier milestones: see the header of `scripts/hpc/train.sbatch` for one-time setup, then:
 
 ```bash
 ARGS="--guide heuristic" TAG=guided sbatch scripts/hpc/train.sbatch   # set --account first
