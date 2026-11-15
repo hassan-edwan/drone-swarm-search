@@ -44,6 +44,7 @@ swarmsearch/
 scripts/
   train.py, evaluate.py, imitate.py, imitate_gru.py, run3d.py, render_episode.py, make_figures.py
 docs/REPORT.md  results and findings
+docs/ASSUMPTIONS.md  what the simulator assumes, the evidence, and what is still open
 tests/
 ```
 
