@@ -1,0 +1,7 @@
+11:23  (min   0.0)  launch: 3 drones, despondent lost 10.0 h ago, day, 22 C, wind 1 m/s; person is unresponsive, behaviour 'stay'
+11:34  (min  10.4)  operator has reviewed 10 alerts (0 real ones missed), 0 waiting
+11:36  (min  12.6)  operator confirms a find -> ground team dispatched
+11:41  (min  17.1)  operator has reviewed 20 alerts (0 real ones missed), 0 waiting
+11:47  (min  23.6)  operator has reviewed 30 alerts (0 real ones missed), 0 waiting
+11:49  (min  26.0)  ground team reaches the person: rescued
+11:49  (min  26.0)  end: found 100%, rescued 100%, 32 alerts (31 false), 0 battery swaps, area covered 29%
