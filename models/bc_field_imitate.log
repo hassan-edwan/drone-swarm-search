@@ -1,0 +1,25 @@
+round 0 beta 1.0: 349750 samples, rollout find time 60% of budget, found 54% (323s)
+  epoch 1/4 loss 1.820 acc 0.389
+  epoch 2/4 loss 1.483 acc 0.513
+  epoch 3/4 loss 1.442 acc 0.526
+  epoch 4/4 loss 1.424 acc 0.531
+round 0: fit on 349750 samples, accuracy 53.1%
+round 1 beta 0.5: 337792 samples, rollout find time 57% of budget, found 55% (631s)
+  epoch 1/4 loss 1.586 acc 0.485
+  epoch 2/4 loss 1.555 acc 0.495
+  epoch 3/4 loss 1.534 acc 0.501
+  epoch 4/4 loss 1.515 acc 0.507
+round 1: fit on 687542 samples, accuracy 50.7%
+round 2 beta 0.25: 309861 samples, rollout find time 60% of budget, found 56% (945s)
+  epoch 1/4 loss 1.586 acc 0.486
+  epoch 2/4 loss 1.557 acc 0.496
+  epoch 3/4 loss 1.537 acc 0.502
+  epoch 4/4 loss 1.520 acc 0.507
+round 2: fit on 997403 samples, accuracy 50.7%
+round 3 beta 0.0: 353647 samples, rollout find time 64% of budget, found 48% (1284s)
+  epoch 1/4 loss 1.548 acc 0.497
+  epoch 2/4 loss 1.515 acc 0.507
+  epoch 3/4 loss 1.493 acc 0.514
+  epoch 4/4 loss 1.474 acc 0.520
+round 3: fit on 1351050 samples, accuracy 52.0%
+clone alone: find time 68% of budget, found 43%
