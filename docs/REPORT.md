@@ -97,7 +97,9 @@ simulation was made more realistic. A camera model added flying height, sight
 lines past buildings, cover and false alarms that must be confirmed from low
 altitude (Figure 3); it also showed that the training reward must match the
 goal, since early policies hovered high and found nobody until finds were
-rewarded for being early.
+rewarded for being early. Reinforcement learning on top of a copy of the rule
+improved it at first, but drifted away from it once the pull towards the copy
+was released; the camera runs ended below the rule.
 
 Next, the world was allowed to disagree with the drones' model: a sensor
 weaker than assumed, buildings that had collapsed unseen, radio links that
@@ -120,14 +122,30 @@ urban collapse, wilderness and flood scenarios on real or generated terrain.
 Lost-person statistics set where people go and how large the search area is;
 people may not respond to drones or may hide; an operator must confirm each
 detection; drones swap batteries and lose radio contact behind terrain; and
-ground teams carry out the rescue. Realistic wilderness search is hard: the
-baselines find the person in about a quarter of sample missions, which leaves
-clear room for a better policy.
+ground teams carry out the rescue. Realistic wilderness search is hard, mostly because many lost people have
+walked beyond any area that can be searched in 90 minutes (Table 3).
+
+A first learned policy was trained here on four CPU cores: a copy of the rule,
+refined by 4 million steps of reinforcement learning with the pull towards the
+copy kept on. It matches the rule in the wilderness, where both beat the sweep,
+does better when radio links fail, and is slightly behind on the unseen flood
+scenario. It does not yet improve on the rule overall, which is the target for
+Phase 2.
+
+*Table 3. Field environment, 50 missions per condition: share of missions in
+which the person is found (in brackets: among people inside the search area).*
+
+| Scenario | Lawnmower | Rule | Learned |
+|---|---|---|---|
+| Wilderness, nine conditions pooled | 19% (61%) | 24% (66%) | 25% (67%) |
+| Wilderness, radio links fail | 15% (57%) | 16% (58%) | 26% (68%) |
+| Urban collapse | 75% (81%) | 77% (83%) | 74% (80%) |
+| Flood, not seen in training | 56% (68%) | 53% (65%) | 48% (58%) |
 
 Phase 2 will train in this environment at scale: imitation of the rule
 followed by reinforcement learning with the find-time reward, across scenario
-families, with several seeds, evaluated on hard cases and on the unseen flood
-scenario. This requires more compute than the four CPU cores used in Phase 1,
+families, with several seeds and many more missions per update, evaluated on
+hard cases and on the unseen flood scenario. This requires more compute than the four CPU cores used in Phase 1,
 and will be followed by calibration against field tests and a learned flight
 controller.
 
@@ -136,4 +154,8 @@ controller.
 *Figure 5. The field environment: (a) wilderness, a hiker on an 11.6 km map
 sized from lost-person data ([video](../results/figures/field_wilderness.mp4));
 (b) urban collapse with smoke ([video](../results/figures/field_urban.mp4));
-(c) flood, held out for testing ([video](../results/figures/field_flood.mp4)).*
+(c) flood, held out for testing ([video](../results/figures/field_flood.mp4)).
+The same wilderness mission flown by the sweep
+([video](../results/figures/field_base_sweep.mp4)) and the learned policy
+([video](../results/figures/field_learned.mp4)), and seen from one drone's
+cameras ([video](../results/figures/field_drone_view.mp4)).*
