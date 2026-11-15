@@ -208,18 +208,35 @@ def test_real_site_import_round_trip(tmp_path):  # E2, M1: real map layers
     import subprocess
     import sys
     rng = np.random.default_rng(0)
-    dem = np.cumsum(rng.normal(0, 1, (400, 400)), axis=0) + np.linspace(0, 300, 400)[None]
-    trails = np.zeros((400, 400), dtype=bool)
-    trails[200, :] = True
+    dem = np.cumsum(rng.normal(0, 1, (800, 800)), axis=0) + np.linspace(0, 300, 800)[None]
+    trails = np.zeros((800, 800), dtype=bool)
+    trails[400, :] = True
     np.save(tmp_path / "dem.npy", dem)
-    np.save(tmp_path / "canopy.npy", rng.uniform(0, 100, (400, 400)))
+    np.save(tmp_path / "canopy.npy", rng.uniform(0, 100, (800, 800)))
     np.save(tmp_path / "trails.npy", trails)
     out = tmp_path / "site.npz"
     subprocess.run([sys.executable, "scripts/import_site.py", "--dem", str(tmp_path / "dem.npy"), "--cell-m", "10",
                     "--canopy", str(tmp_path / "canopy.npy"), "--trails", str(tmp_path / "trails.npy"),
-                    "--ipp", "200", "200", "--out", str(out)], check=True, capture_output=True)
+                    "--ipp", "400", "400", "--cell-out", "100", "--out", str(out)], check=True, capture_output=True)
     env = FieldEnv()
-    sc = _sc("wilderness", 11, site=str(out))
+    sc = _sc("wilderness", 11, site=str(out), cell_m=100.0)
     env.reset(seed=11, options={"scenario": sc})
-    assert env.w.trail.sum() > 0 and env.w.g == 48
+    assert env.w.trail.sum() > 0 and env.w.g == 64 and env.fam.cell_m == 100.0
     _random_steps(env, 20)
+
+
+def test_isrid_distance_model_matches_published_quartiles():  # P5
+    from swarmsearch.field import lpb
+    q = lpb.CATEGORIES["hiker"]["dist_km"]
+    assert np.allclose(lpb.quantile_cdf(np.array(q), q), lpb.Q)
+    rng = np.random.default_rng(0)
+    d = np.array([lpb.sample_distance(rng, q) for _ in range(20000)])
+    assert np.allclose(np.quantile(d, lpb.Q), q, rtol=0.06)
+
+
+def test_search_area_sized_to_the_category():  # E1: 75% distance at the map edge
+    from swarmsearch.field import lpb
+    for cat in ("hiker", "dementia"):
+        fam = _sc("wilderness", 0, category=cat, cell_m=0.0).fam
+        q75 = lpb.CATEGORIES[cat]["dist_km"][2] * 1000
+        assert abs(fam.cell_m * fam.grid / 2 - q75) / q75 < 0.05 or fam.cell_m in (50.0, 200.0)

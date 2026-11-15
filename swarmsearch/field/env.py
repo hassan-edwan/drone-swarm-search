@@ -118,9 +118,19 @@ class FieldEnv(GridSearchEnv):
     n_free = property(lambda s: int(s._v.map.walk.sum()))
 
     def footprint_values(self, k: int) -> np.ndarray:
-        """Expected detections over the footprint at height k from every cell (hovering)."""
+        """Expected detections over the footprint at height k from every cell
+        (hovering), with the same diminishing returns the map uses (S2): a
+        cell already looked at from straight above at this height is worth
+        less to look at that way again."""
         from ..camera import footprint_sum
-        return footprint_sum(self.belief * self.C_model, self._v.map.G[k])
+        o = self.occ_model
+        pl = np.minimum(0.98, np.clip(0.5 * self.C_model, 1e-3, 0.98) / np.maximum(1e-6, 1 - o))
+        n = self._v.N[k * sn.N_CLASS + 4]  # straight-down view at height k
+
+        def f(m):
+            return o + (1 - o) * (1 - pl) ** m
+        disc = (1 - f(n + 1) / f(n)) / np.maximum(1 - f(1), 1e-9)
+        return footprint_sum(self.belief * self.C_model * disc, self._v.map.G[k])
 
     # ------------------------------------------------------------------ reset
     def reset(self, seed=None, options=None):
@@ -272,7 +282,7 @@ class FieldEnv(GridSearchEnv):
         return sc.smoke * shape
 
     def _link_mask(self, sc, w) -> np.ndarray:
-        """Cells where the radio plan says a drone at mid height keeps a link to
+        """Cells where the radio plan says a drone at its top height keeps a link to
         the base (range, and terrain/buildings for the shorter blocked range).
         Planners stay inside it when drones return on link loss (D6)."""
         g, fam = w.g, sc.fam
@@ -287,7 +297,7 @@ class FieldEnv(GridSearchEnv):
                 if d <= rng_c * rl.NLOS_FACTOR:
                     out[y, x] = True
                 elif d <= 0.9 * rng_c:
-                    out[y, x] = rl.line_clear(w.map_surface, w.base, (x, y), base_h, w.elev[y, x] + fam.alt_m[1])
+                    out[y, x] = rl.line_clear(w.map_surface, w.base, (x, y), base_h, w.elev[y, x] + fam.alt_m[2])
         return out
 
     def _patrol_route(self, w):

@@ -13,6 +13,8 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from .lpb import CATEGORIES, CATEGORY_WEIGHTS
+
 FAMILIES = ("urban", "wilderness", "flood")
 
 
@@ -28,32 +30,47 @@ class Family:
     alt_detect: tuple[float, float, float]  # detection per height (person smaller in the image higher up)
     n_drones: tuple[int, int]
     n_teams: tuple[int, int]  # ground teams (O2)
+    hfov_deg: float = 84.0  # wide-angle camera
+    cruise_mps: float = 10.0
+
+    def scaled(self, cell_m: float, mission_s: float) -> "Family":
+        """This family at another cell size (the search area is sized per mission):
+        the step is the time to cross a cell at cruise speed, and the camera
+        footprint in cells follows from its height and field of view. When the
+        footprint is narrower than a cell, a pass covers that share of it."""
+        half = [h * np.tan(np.radians(self.hfov_deg / 2)) for h in self.alt_m]
+        foot_r = tuple(int(min(2, max(0, round(hw / cell_m - 0.5)))) for hw in half)
+        cover = [min(1.0, 2 * hw / cell_m) if r == 0 else 1.0 for hw, r in zip(half, foot_r)]
+        base = FAMILY_BASE_DETECT[self.name]
+        step_s = cell_m / self.cruise_mps
+        return replace(self, cell_m=cell_m, step_s=step_s, max_steps=int(round(mission_s / step_s)), foot_r=foot_r,
+                       alt_detect=tuple(float(d * c) for d, c in zip(base, cover)))
 
 
 # E1: scale. Cruise speeds 5-10 m/s; missions of 30-60 min with battery swaps (D1).
 URBAN = Family("urban", grid=20, cell_m=10.0, step_s=2.0, max_steps=900, alt_m=(15.0, 35.0, 60.0),
                foot_r=(0, 1, 2), alt_detect=(1.0, 0.7, 0.45), n_drones=(2, 6), n_teams=(1, 3))
-# Wilderness: 3.6 km square centred on the trailhead, so the area holds about
-# the median lost-hiker distance in every direction (planners draw the search
-# area around the last-seen point). 75 m cells; wide-angle camera at 120 m
-# sees about three cells across.
-WILDERNESS = Family("wilderness", grid=48, cell_m=75.0, step_s=7.5, max_steps=480, alt_m=(40.0, 70.0, 120.0),
+# Wilderness: 64 x 64 cells around the trailhead. The cell size is set per
+# mission so the map reaches the subject category's 75% distance from the
+# last-seen point (ISRID, see lpb.py): planners size the search area to the
+# category. 90-minute missions (about two batteries).
+WILDERNESS = Family("wilderness", grid=64, cell_m=75.0, step_s=7.5, max_steps=720, alt_m=(40.0, 70.0, 120.0),
                     foot_r=(0, 0, 1), alt_detect=(0.9, 0.75, 0.35), n_drones=(2, 4), n_teams=(1, 3))
+WILDERNESS_MISSION_S = 5400.0
+CELL_RANGE_M = (50.0, 200.0)
 FLOOD = Family("flood", grid=32, cell_m=25.0, step_s=3.0, max_steps=600, alt_m=(20.0, 45.0, 90.0),
                foot_r=(0, 1, 2), alt_detect=(1.0, 0.75, 0.45), n_drones=(2, 5), n_teams=(1, 2))
 FAMILY = {f.name: f for f in (URBAN, WILDERNESS, FLOOD)}
+FAMILY_BASE_DETECT = {f.name: f.alt_detect for f in (URBAN, WILDERNESS, FLOOD)}
+_SCALED: dict = {}
 
-# Subject categories (P1, P5): share unresponsive / evasive (rest signal when a
-# drone is close), distance median from the last-seen point in km (wilderness,
-# illustrative until replaced by ISRID values [1]). Dementia subjects usually do
-# not respond [3][12]; children 7-12 often hide [13].
-CATEGORIES = {
-    "hiker": dict(unresponsive=0.5, evasive=0.02, d50_km=1.5),
-    "hunter": dict(unresponsive=0.5, evasive=0.02, d50_km=1.8),
-    "child_7_12": dict(unresponsive=0.5, evasive=0.35, d50_km=1.0),
-    "dementia": dict(unresponsive=0.85, evasive=0.1, d50_km=0.8),
-    "despondent": dict(unresponsive=0.7, evasive=0.25, d50_km=0.9),
-}
+
+def wilderness_cell_m(category: str) -> float:
+    """Cell size that puts the category's 75% distance at the map edge."""
+    q75_m = CATEGORIES[category]["dist_km"][2] * 1000.0
+    return float(np.clip(2 * q75_m / WILDERNESS.grid, *CELL_RANGE_M))
+
+# Subject categories and their data: lpb.py (ISRID and related studies).
 LIGHTS = ("day", "dusk", "night")
 
 
@@ -74,6 +91,9 @@ class FieldScenario:
     fatigue_h: float = 6.0  # mobility halves every this many hours (P4)
     hours_lost: float = 2.0  # time since lost when drones launch (K3)
     hypothermic: float = 0.15  # share with weak thermal contrast (P8)
+    cell_m: float = 0.0  # wilderness: per-mission cell size (0 = from the category)
+    dot_deg: float = 0.0  # the person's true direction of travel from the last-seen point (deg)
+    dot_known: bool = False  # the team knows it (planned route, footprints, last sighting heading)
     # Knowledge (K)
     ipp_err_m: float = 150.0  # error of the reported last-seen point (K1)
     ipp_wrong: bool = False  # last-seen point plainly wrong (K1, hard case)
@@ -123,7 +143,13 @@ class FieldScenario:
 
     @property
     def fam(self) -> Family:
-        return FAMILY[self.family]
+        if self.family != "wilderness":
+            return FAMILY[self.family]
+        cell = self.cell_m or wilderness_cell_m(self.category)
+        key = round(cell, 3)
+        if key not in _SCALED:
+            _SCALED[key] = WILDERNESS.scaled(cell, WILDERNESS_MISSION_S)
+        return _SCALED[key]
 
     # Names shared with the grid scenarios (evaluation, baselines).
     camera = property(lambda self: True)
@@ -141,8 +167,8 @@ class FieldSampler:
     camera: bool = True  # interface flags shared with the grid environment
     real: bool = True
     field: bool = True
-    grid_size: int = 48  # largest map; each mission uses its family's size
-    max_steps: int = 900
+    grid_size: int = 64  # largest map; each mission uses its family's size
+    max_steps: int = 1100
 
     def sample(self, rng: np.random.Generator) -> FieldScenario:
         names = list(self.families)
@@ -155,7 +181,8 @@ def sample_scenario(rng: np.random.Generator, family: str, **override) -> FieldS
     fam = FAMILY[family]
     u = rng.uniform
     if family == "wilderness":
-        cat = list(CATEGORIES)[rng.choice(len(CATEGORIES), p=[0.45, 0.2, 0.1, 0.1, 0.15])]
+        cats = list(CATEGORY_WEIGHTS)
+        cat = cats[rng.choice(len(cats), p=[CATEGORY_WEIGHTS[c] for c in cats])]
         n_people = 1 if rng.random() < 0.85 else int(rng.integers(2, 4))
         group = n_people
         n_est_err = 0.0  # the reporting party knows who is missing
@@ -166,15 +193,17 @@ def sample_scenario(rng: np.random.Generator, family: str, **override) -> FieldS
         n_est_err = 0.4
     hour = float(u(0, 24))
     light = "day" if 7 <= hour < 18 else "dusk" if 18 <= hour < 20 or 6 <= hour < 7 else "night"
+    dot = float(u(0, 360))
     sc = FieldScenario(
         family=family, seed_world=int(rng.integers(1 << 30)),
+        dot_deg=dot, dot_known=bool(rng.random() < 0.5),
         n_drones=int(rng.integers(fam.n_drones[0], fam.n_drones[1] + 1)),
         category=cat, n_people=n_people, group_size=group, n_est_err=n_est_err,
         p_off_model=float(u(0.05, 0.3)), p_injured=float(u(0.05, 0.4)), fatigue_h=float(u(3, 12)),
         hours_lost=float(u(0.5, 12)) if family == "wilderness" else float(u(0.2, 6)),
         hypothermic=float(u(0.0, 0.3)),
         ipp_err_m=float(u(30, 500)), ipp_wrong=bool(rng.random() < 0.1), d50_scale=float(np.exp(rng.normal(0, 0.35))),
-        p_outside=float(u(0.0, 0.15)), phone_ping=bool(rng.random() < 0.1), map_error=float(u(0.0, 0.4)),
+        p_outside=float(u(0.0, 0.05)),  # beyond what the distance data already put outside phone_ping=bool(rng.random() < 0.1), map_error=float(u(0.0, 0.4)),
         profile_told=bool(rng.random() < 0.3),
         sensor_scale=float(u(0.4, 1.1)), fa_scale=float(u(0.5, 3.0)), light=light, hour=hour,
         air_c=float(u(-5, 35)), rain=float(u(0, 0.4)), n_operators=int(rng.integers(1, 3)),
@@ -183,8 +212,9 @@ def sample_scenario(rng: np.random.Generator, family: str, **override) -> FieldS
         gust=float(u(0, 0.2)), gps_err=float(u(0.02, 0.08)), tilt=bool(rng.random() < 0.3),
         n_nofly=int(rng.integers(0, 3)), p_tfr=float(u(0, 0.4)), rtb_on_link_loss=bool(rng.random() < 0.5),
         fail_per_h=float(u(0.0, 0.03)),
-        comm_range_m=float(u(80, 300)) if family == "urban" else float(u(300, 2500)),  # buildings vs open ground
-        comm_loss=float(u(0, 0.2)), tether_relay=bool(rng.random() < 0.2),
+        # Drone video links are rated for km in line of sight; terrain and buildings cut them (C1).
+        comm_range_m=float(u(200, 1000)) if family == "urban" else float(u(2000, 10000)),
+        comm_loss=float(u(0, 0.2)), tether_relay=bool(rng.random() < 0.5),
         overwatch=float(u(0.3, 1.0)), n_teams=int(rng.integers(fam.n_teams[0], fam.n_teams[1] + 1)),
         collapse_frac=float(u(0, 0.5)), aftershock=float(u(0, 0.3)), smoke=float(u(0, 0.6)),
         water_rise=float(u(0, 2.0)),

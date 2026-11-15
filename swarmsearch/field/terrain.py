@@ -288,6 +288,8 @@ def make_world(rng, sc) -> World:
     fam = sc.fam
     if sc.family == "wilderness" and sc.site:
         d = np.load(sc.site)
+        if abs(float(d["cell_m"]) - fam.cell_m) > 1e-6:
+            raise ValueError(f"site cell size {float(d['cell_m'])} m: set FieldScenario(cell_m={float(d['cell_m'])})")
         return world_from_arrays(d["elev"], d["canopy"], d["trail"], d["water"], float(d["cell_m"]),
                                  tuple(int(v) for v in d["base"]), tuple(int(v) for v in d["ipp"]))
     if sc.family == "wilderness":

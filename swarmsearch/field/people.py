@@ -27,6 +27,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..obstacles import distance_fields
+from . import lpb
 from .sensing import light_level
 
 N8 = np.array([(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)])
@@ -47,7 +48,6 @@ MIX = {
 }
 POSTURE = {"standing": 1.0, "sitting": 0.8, "lying": 0.65}
 WALK_MPS = (0.4, 1.4)
-D50_SIGMA = 0.75  # log-normal spread of distance from the last-seen point
 REST_S, RESUME_S = 900.0, 600.0  # mean seconds walking before a rest / resting before walking on
 SWITCH_S = 3600.0  # mean seconds before a person changes behaviour
 HEAR_M = 150.0  # people notice a drone within this distance
@@ -71,33 +71,6 @@ def behaviour_mix(sc) -> dict:
 
 
 # ----------------------------------------------------------------- prior
-def ring_density(g: int, cell_m: float, centre, d50_m: float, sigma: float = D50_SIGMA) -> tuple[np.ndarray, float]:
-    """Per-cell probability of a log-normal distance from `centre` (spread
-    evenly around each ring), and the probability of being off the map."""
-    yy, xx = np.mgrid[0:g, 0:g]
-    r = np.hypot(xx - centre[0], yy - centre[1]) * cell_m
-    r = np.maximum(r, cell_m * 0.5)
-    pdf_r = np.exp(-(np.log(r / d50_m)) ** 2 / (2 * sigma ** 2)) / (r * sigma * np.sqrt(2 * np.pi))
-    dens = pdf_r / (2 * np.pi * r) * cell_m * cell_m  # probability in each cell
-    inside = float(dens.sum())
-    return dens, float(np.clip(1.0 - inside, 0.0, 0.99))
-
-
-def terrain_weight(w, mix: dict, use_map: bool = True) -> np.ndarray:
-    """How much more likely people are found on each terrain feature, mixed over behaviours."""
-    trail = w.map_trail if use_map else w.trail
-    elev_n = (w.elev - w.elev.min()) / max(np.ptp(w.elev), 1e-9)
-    feat = {
-        "trail": 1.0 + 2.0 * trail,
-        "downhill": 1.0 + 1.5 * w.stream + 0.5 * (1 - elev_n),
-        "uphill": 1.0 + 1.5 * elev_n,
-    }
-    out = np.zeros_like(w.elev)
-    for k, p in mix.items():
-        out += p * feat.get(k, np.ones_like(w.elev))
-    return out
-
-
 def prior(w, sc, rng, ping=None) -> tuple[np.ndarray, float, tuple[int, int]]:
     """The drones' prior over cells, the mass they put outside the map, and
     the last-seen point they were told."""
@@ -109,9 +82,14 @@ def prior(w, sc, rng, ping=None) -> tuple[np.ndarray, float, tuple[int, int]]:
             ang = rng.uniform(0, 2 * np.pi)
             err = np.array([np.cos(ang), np.sin(ang)]) * rng.uniform(600, 1500) / cell_m
         rep = (int(np.clip(round(w.ipp[0] + err[0]), 0, g - 1)), int(np.clip(round(w.ipp[1] + err[1]), 0, g - 1)))
-        from .params import CATEGORIES
-        dens, out = ring_density(g, cell_m, rep, CATEGORIES[sc.category]["d50_km"] * 1000.0)
-        dens = dens * terrain_weight(w, behaviour_mix(sc)) * walk
+        cat = lpb.CATEGORIES[sc.category]
+        # ISRID distance rings for the category [JSAR20][K20][NZSAR], terrain
+        # multipliers [J16] on the drones' map, and the dispersion angle around
+        # the direction of travel when it is known.
+        dens, out = lpb.ring_probability(g, cell_m, rep, cat["dist_km"])
+        dens = dens * lpb.terrain_multiplier(w.map_trail, w.stream, w.elev) * walk
+        if sc.dot_known:
+            dens = dens * lpb.angle_weight(g, rep, sc.dot_deg, cat["disp_deg"])
         out = max(out, 0.05)
     elif sc.family == "urban":
         rep = w.base
@@ -195,8 +173,7 @@ def move_weights(kind, w, move_p: np.ndarray, directed: float, walk, trail, targ
 def hypothesis_bank(w, sc, rep_ipp, rng) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray]:
     """Movement hypotheses on the drones' map: names, (K, 9, g, g) weights,
     prior weights, and each one's move probability per step."""
-    from .params import FAMILY
-    fam = FAMILY[sc.family]
+    fam = sc.fam
     walk, trail = w.map_walk, w.map_trail
     sl = _slope(w)
     base_p = 0.8 * fam.step_s / fam.cell_m  # a typical walker, before slope
@@ -276,9 +253,8 @@ def _slope(w) -> np.ndarray:
 # ------------------------------------------------------------------- truth
 class People:
     def __init__(self, w, sc, rng):
-        from .params import CATEGORIES, FAMILY
         self.w, self.sc, self.rng = w, sc, rng
-        fam = FAMILY[sc.family]
+        fam = sc.fam
         self.fam = fam
         g = w.g
         n = sc.n_people
@@ -292,9 +268,9 @@ class People:
         self.injured = rng.random(n) < sc.p_injured
         self.resting = np.zeros(n, dtype=bool)
         self.trapped = np.zeros(n, dtype=bool)
-        cat = CATEGORIES.get(sc.category, CATEGORIES["hiker"])
-        p_un = sc.p_unresponsive if sc.p_unresponsive is not None else cat["unresponsive"]
+        cat = lpb.CATEGORIES.get(sc.category, lpb.CATEGORIES["hiker"])
         p_ev = sc.p_evasive if sc.p_evasive is not None else cat["evasive"]
+        p_un = sc.p_unresponsive if sc.p_unresponsive is not None else max(0.0, 1.0 - cat["respond"] - p_ev)
         r = rng.random(n)
         self.resp = np.where(r < p_un, "unresponsive", np.where(r < p_un + p_ev, "evasive", "signals")).astype(object)
         if sc.force == "unresponsive":
@@ -303,7 +279,13 @@ class People:
             self.resp[:] = "evasive"
         self.vis = np.clip(np.exp(rng.normal(0.0, 0.4, n)), 0.3, 2.0)  # clothing contrast (P7)
         hours = sc.hours_lost
-        dead = rng.random(n) < min(0.3, 0.01 * hours)  # P8
+        if sc.family == "wilderness":  # P8: published survival curves by category [K20]
+            p_dead = 1.0 - lpb.survival(hours / 24.0, cat["survive_d"])
+        else:
+            p_dead = min(0.3, 0.01 * hours)
+        dead = rng.random(n) < p_dead
+        # P4: how long each person keeps moving before stopping for good [K20][K06]
+        self.mobile_h = np.array([lpb.sample_mobile_hours(rng, cat["mobile_h"]) for _ in range(n)])
         hypo = rng.random(n) < sc.hypothermic
         self.warm = np.where(dead, 0.15, np.where(hypo, 0.5, 1.0))
         self.dead = dead
@@ -317,9 +299,7 @@ class People:
         kinds = list(mix)
         # Place people (P5, K2, K4) and give them behaviours (P3).
         if sc.family == "wilderness":
-            d50 = cat["d50_km"] * 1000.0 * sc.d50_scale
-            dens, p_off = ring_density(g, w.cell_m, w.ipp, d50)
-            dens = dens * terrain_weight(w, mix, use_map=False) * w.walk
+            dens, p_off = None, 0.0  # placed by distance and direction below
         elif sc.family == "urban":
             dens = w.walk.astype(float)
             p_off = 0.02
@@ -329,14 +309,18 @@ class People:
         p_off = min(0.95, p_off + sc.p_outside)
         if sc.force == "outside":
             p_off = 1.0
-        dens = dens / max(dens.sum(), 1e-12)
-        cells = np.flatnonzero(dens > 0)
+        if dens is not None:
+            dens = dens / max(dens.sum(), 1e-12)
+            cells = np.flatnonzero(dens > 0)
         i = 0
         while i < n:
             size = min(sc.group_size, n - i)
             if rng.random() < p_off:
                 self.outside[i:i + size] = True
-                c = cells[0]
+                c = int(w.ipp[1] * g + w.ipp[0])
+            elif dens is None:
+                c, out = self._place_wild(cat, mix, rng)
+                self.outside[i:i + size] = out
             else:
                 c = int(rng.choice(cells, p=dens[np.unravel_index(cells, dens.shape)] / dens.flat[cells].sum()))
             cy, cx = divmod(c, g)
@@ -365,11 +349,42 @@ class People:
                     self.kind[j] = "drift"
                 elif w.struct_h[y, x] > 0:
                     self.kind[j] = "stay"  # stranded on a roof
+        for j in range(n):  # already stopped for good before the drones launch
+            if hours >= self.mobile_h[j] and self.kind[j] != "drift":
+                self.kind[j] = "stay"
         p_none = 1.0 if sc.force == "off_model" else sc.p_off_model
         for j in range(n):
             if not self.trapped[j] and self.kind[j] not in ("drift",) and rng.random() < p_none:
                 self.kind[j] = "none"
         self.mix = mix
+
+    def _place_wild(self, cat, mix, rng) -> tuple[int, bool]:
+        """Where a lost person is at launch: an ISRID distance for the category
+        (spread ×d50_scale, K4), scaled by how much of their moving time has
+        passed, in a direction drawn from the dispersion angle around their
+        direction of travel, favouring trails, streams and low and high points
+        [J16]. Off the map means outside the search area (K2)."""
+        w, sc = self.w, self.sc
+        g = w.g
+        q = tuple(d * sc.d50_scale for d in cat["dist_km"])
+        tm = lpb.terrain_multiplier(w.trail, w.stream, w.elev)
+        mh = lpb.sample_mobile_hours(rng, cat["mobile_h"])
+        frac = min(1.0, sc.hours_lost / max(mh, 1e-3))
+        last = None
+        for _ in range(300):
+            d = lpb.sample_distance(rng, q) * frac * 1000.0 / w.cell_m
+            dev = min(180.0, lpb.sample_distance(rng, cat["disp_deg"])) * rng.choice([-1, 1])
+            ang = np.radians(sc.dot_deg + dev)
+            x, y = int(round(w.ipp[0] + d * np.cos(ang))), int(round(w.ipp[1] - d * np.sin(ang)))
+            if not (0 <= x < g and 0 <= y < g):
+                return int(w.ipp[1] * g + w.ipp[0]), True
+            if not w.walk[y, x]:
+                continue
+            last = (x, y)
+            if rng.random() < tm[y, x] / tm.max():
+                break
+        x, y = last if last is not None else w.ipp
+        return int(y * g + x), False
 
     # -------------------------------------------------------------- fields
     def _field(self, key):
@@ -429,6 +444,8 @@ class People:
                 elif self.resp[i] == "evasive":
                     self.hiding[i] = True
                     react = "cover"
+            if t_hours >= self.mobile_h[i] and self.kind[i] != "drift":
+                self.kind[i] = "stay"  # stopped for good (P4)
             mobility = 0.5 ** (t_hours / sc.fatigue_h) * (0.15 if dark else 1.0) * (0.5 if rain else 1.0)
             if self.kind[i] == "drift":
                 mobility = 1.0

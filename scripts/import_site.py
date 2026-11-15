@@ -2,7 +2,7 @@
 
     python scripts/import_site.py --dem dem.tif --canopy canopy.tif --trails trails.geojson \
         --water water.geojson --ipp 512 300 --out sites/my_site.npz
-    python scripts/train.py ...  /  FieldScenario(family="wilderness", site="sites/my_site.npz")
+    FieldScenario(family="wilderness", site="sites/my_site.npz", cell_m=<printed cell size>)
 
 Inputs (all in the same projected coordinate system, metres):
 - --dem: elevation raster (GeoTIFF with rasterio installed, or a .npy array with --cell-m).
@@ -11,7 +11,9 @@ Inputs (all in the same projected coordinate system, metres):
 - --ipp: last-seen point as DEM pixel column and row; --base: command post (defaults to the IPP).
 
 The layers are cropped to a square centred on the IPP and resampled to the
-wilderness family's grid (48 cells of 75 m). Public sources: USGS 3DEP
+wilderness grid (64 cells). The cell size defaults to the one that puts the
+subject category's 75% ISRID distance at the edge (--category), or set it
+with --cell-out. Public sources: USGS 3DEP
 elevation, NLCD tree canopy, OpenStreetMap trails and water.
 """
 
@@ -23,7 +25,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from swarmsearch.field.params import FAMILY  # noqa: E402
+from swarmsearch.field.params import FAMILY, wilderness_cell_m  # noqa: E402
 
 
 def read_raster(path: str, cell_m: float | None):
@@ -71,10 +73,14 @@ def main():
     p.add_argument("--cell-m", type=float, help="DEM pixel size for .npy inputs")
     p.add_argument("--ipp", type=float, nargs=2, required=True, metavar=("COL", "ROW"))
     p.add_argument("--base", type=float, nargs=2, metavar=("COL", "ROW"))
+    p.add_argument("--category", default="hiker", help="subject category: sets the area size")
+    p.add_argument("--cell-out", type=float, help="cell size of the search grid in metres")
     p.add_argument("--out", required=True)
     a = p.parse_args()
 
     fam = FAMILY["wilderness"]
+    out_cell = a.cell_out or wilderness_cell_m(a.category)
+    fam = fam.scaled(out_cell, 5400.0)
     dem, src, cell = read_raster(a.dem, a.cell_m)
     centre = a.ipp
     elev = resample(dem, cell, centre, fam.grid, fam.cell_m, "mean")
