@@ -34,12 +34,13 @@ def main():
                    help="action temperatures for each model (1 = as trained, 0 = always the top action)")
     p.add_argument("--lookahead", type=int, default=0, help="also run each model with H-step lookahead re-ranking")
     p.add_argument("--random", action="store_true", help="include the random-walk baseline")
+    p.add_argument("--no-baselines", action="store_true", help="only the given models (baselines already evaluated)")
     p.add_argument("--tag", default="", help="suffix for the results files")
     p.add_argument("--out", default="results")
     p.add_argument("--guide", default=None, help="override the guide a model was trained with")
     a = p.parse_args()
 
-    policies = {"lawnmower": Lawnmower(), "belief_greedy": BeliefGreedy()}
+    policies = {} if a.no_baselines else {"lawnmower": Lawnmower(), "belief_greedy": BeliefGreedy()}
     if a.random:
         policies["random"] = RandomWalk(seed=0)
     for path in a.models:
