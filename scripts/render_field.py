@@ -90,13 +90,19 @@ def main():
     p.add_argument("--condition", default="wild_mix", choices=list(FIELD_CONDITIONS))
     p.add_argument("--seed", type=int, default=8)
     p.add_argument("--policy", default="rule", choices=["rule", "sweep"])
+    p.add_argument("--model", default=None, help="a trained field model instead of the rule or sweep")
     p.add_argument("--every", type=int, default=2, help="steps per frame")
     p.add_argument("--fps", type=int, default=12)
     p.add_argument("--out", default="results/figures/field_wilderness.mp4")
     a = p.parse_args()
 
     sc = FIELD_CONDITIONS[a.condition](a.seed)
-    env, frames, events, start = run(sc, a.seed, BeliefGreedy() if a.policy == "rule" else Lawnmower())
+    if a.model:
+        from swarmsearch.mappo import LearnedPolicy, load
+        pol = LearnedPolicy(load(a.model)[0], temperature=0)
+    else:
+        pol = BeliefGreedy() if a.policy == "rule" else Lawnmower()
+    env, frames, events, start = run(sc, a.seed, pol)
     w, fam, g = env.w, env.fam, env.grid_size
     log_path = Path(a.out).with_suffix(".txt")
     log_path.parent.mkdir(parents=True, exist_ok=True)
