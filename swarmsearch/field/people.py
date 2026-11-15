@@ -82,15 +82,7 @@ def prior(w, sc, rng, ping=None) -> tuple[np.ndarray, float, tuple[int, int]]:
             ang = rng.uniform(0, 2 * np.pi)
             err = np.array([np.cos(ang), np.sin(ang)]) * rng.uniform(600, 1500) / cell_m
         rep = (int(np.clip(round(w.ipp[0] + err[0]), 0, g - 1)), int(np.clip(round(w.ipp[1] + err[1]), 0, g - 1)))
-        cat = lpb.CATEGORIES[sc.category]
-        # ISRID distance rings for the category [JSAR20][K20][NZSAR], terrain
-        # multipliers [J16] on the drones' map, and the dispersion angle around
-        # the direction of travel when it is known.
-        dens, out = lpb.ring_probability(g, cell_m, rep, cat["dist_km"])
-        dens = dens * lpb.terrain_multiplier(w.map_trail, w.stream, w.elev) * walk
-        if sc.dot_known:
-            dens = dens * lpb.angle_weight(g, rep, sc.dot_deg, cat["disp_deg"])
-        out = max(out, 0.05)
+        dens, out = ring_density(w, sc, rep)
     elif sc.family == "urban":
         rep = w.base
         dens = walk * (1.0 + 1.0 * (w.extra["cover"] == 1))  # rubble by buildings: people trapped nearby
@@ -108,6 +100,19 @@ def prior(w, sc, rng, ping=None) -> tuple[np.ndarray, float, tuple[int, int]]:
         dens = dens * np.where(np.hypot(xx - px, yy - py) <= rad, 4.0, 1.0)
     dens = dens / max(dens.sum(), 1e-12) * (1.0 - out)
     return dens, out, rep
+
+
+def ring_density(w, sc, rep) -> tuple[np.ndarray, float]:
+    """Wilderness prior around the reported point: ISRID distance rings for the
+    category [JSAR20][K20][NZSAR], terrain multipliers [J16] on the drones' map,
+    and the dispersion angle around the direction of travel when it is known.
+    Per-cell weights (unnormalised) and the chance of being beyond the map."""
+    cat = lpb.CATEGORIES[sc.category]
+    dens, out = lpb.ring_probability(w.g, w.cell_m, rep, cat["dist_km"])
+    dens = dens * lpb.terrain_multiplier(w.map_trail, w.stream, w.elev) * w.map_walk
+    if sc.dot_known:
+        dens = dens * lpb.angle_weight(w.g, rep, sc.dot_deg, cat["disp_deg"])
+    return dens, max(out, 0.05)
 
 
 # -------------------------------------------------- movement hypotheses
@@ -261,6 +266,9 @@ class People:
         mix = behaviour_mix(sc)
         self.pos = np.zeros((n, 2), dtype=int)
         self.outside = np.zeros(n, dtype=bool)
+        # Where someone outside the area really is, in this grid's cells (NaN: unknown,
+        # e.g. beyond any area the search could grow to). A grown area can take them in (K2).
+        self.far = np.full((n, 2), np.nan)
         self.kind = [""] * n
         self.heading = np.zeros((n, 2), dtype=int)
         self.speed = rng.uniform(*WALK_MPS, n)
@@ -319,8 +327,10 @@ class People:
                 self.outside[i:i + size] = True
                 c = int(w.ipp[1] * g + w.ipp[0])
             elif dens is None:
-                c, out = self._place_wild(cat, mix, rng)
+                c, out, far = self._place_wild(cat, mix, rng)
                 self.outside[i:i + size] = out
+                if out:
+                    self.far[i:i + size] = far
             else:
                 c = int(rng.choice(cells, p=dens[np.unravel_index(cells, dens.shape)] / dens.flat[cells].sum()))
             cy, cx = divmod(c, g)
@@ -358,7 +368,7 @@ class People:
                 self.kind[j] = "none"
         self.mix = mix
 
-    def _place_wild(self, cat, mix, rng) -> tuple[int, bool]:
+    def _place_wild(self, cat, mix, rng) -> tuple[int, bool, tuple[float, float]]:
         """Where a lost person is at launch: an ISRID distance for the category
         (spread ×d50_scale, K4), scaled by how much of their moving time has
         passed, in a direction drawn from the dispersion angle around their
@@ -377,14 +387,14 @@ class People:
             ang = np.radians(sc.dot_deg + dev)
             x, y = int(round(w.ipp[0] + d * np.cos(ang))), int(round(w.ipp[1] - d * np.sin(ang)))
             if not (0 <= x < g and 0 <= y < g):
-                return int(w.ipp[1] * g + w.ipp[0]), True
+                return int(w.ipp[1] * g + w.ipp[0]), True, (x, y)
             if not w.walk[y, x]:
                 continue
             last = (x, y)
             if rng.random() < tm[y, x] / tm.max():
                 break
         x, y = last if last is not None else w.ipp
-        return int(y * g + x), False
+        return int(y * g + x), False, (np.nan, np.nan)
 
     # -------------------------------------------------------------- fields
     def _field(self, key):
@@ -468,6 +478,7 @@ class People:
                 continue
             if not (0 <= nx < g and 0 <= ny < g):
                 self.outside[i] = True  # walked off the map: outside the search area (K2)
+                self.far[i] = (nx, ny)
                 continue
             self.heading[i] = (nx - x, ny - y)
             self.pos[i] = (nx, ny)

@@ -105,6 +105,7 @@ class Lawnmower:
             self.routes[a] = route
         self.idx = {a: 0 for a in env.agents}
         self._fields: dict[tuple[int, int], np.ndarray] = {}
+        self._epoch = getattr(env, "grid_epoch", 0)
 
     def _field(self, env, target):
         if target not in self._fields:
@@ -112,6 +113,8 @@ class Lawnmower:
         return self._fields[target]
 
     def act(self, env: GridSearchEnv) -> dict:
+        if getattr(env, "grid_epoch", 0) != getattr(self, "_epoch", 0):
+            self.reset(env)  # the search area grew: sweep the new map
         out = {}
         if env.camera:
             out = self._confirm(env)
@@ -220,6 +223,7 @@ class BeliefGreedy:
         self.cam_targets: dict[str, tuple[tuple[int, int], int, float]] = {}
         self.tasks: dict[str, tuple[int, int]] = {}
         self._fields: dict[tuple[int, int], np.ndarray] = {}
+        self._epoch = getattr(env, "grid_epoch", 0)
 
     def _field(self, env, target):
         if target not in self._fields:
@@ -230,6 +234,8 @@ class BeliefGreedy:
         live = [a for a in env.agents if env.alive.get(a)]
         if not live:
             return {}
+        if getattr(env, "grid_epoch", 0) != getattr(self, "_epoch", 0):
+            self.reset(env)  # the search area grew: cells moved, plans start again
         if env.camera:
             return self._act_camera(env, live)
         g = env.grid_size

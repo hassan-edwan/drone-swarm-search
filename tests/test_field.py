@@ -240,3 +240,64 @@ def test_search_area_sized_to_the_category():  # E1: 75% distance at the map edg
         fam = _sc("wilderness", 0, category=cat, cell_m=0.0).fam
         q75 = lpb.CATEGORIES[cat]["dist_km"][2] * 1000
         assert abs(fam.cell_m * fam.grid / 2 - q75) / q75 < 0.05 or fam.cell_m in (50.0, 200.0)
+
+
+def _grown_env(seed=1):
+    from dataclasses import replace
+    from swarmsearch.evaluate import FIELD_CONDITIONS
+    sc = replace(FIELD_CONDITIONS["wild_mix"](seed), expand=True, expand_at=9.0)
+    env = FieldEnv()
+    env.reset(seed=seed, options={"scenario": sc})
+    return env
+
+
+def test_expand_keeps_probability_and_positions():
+    env = _grown_env()
+    pol = BeliefGreedy()
+    pol.reset(env)
+    for _ in range(20):
+        env.step(pol.act(env))
+    v = env.views["base"]
+    mass0 = v.B.sum(axis=(1, 2)) + v.out
+    g0, (ox, oy) = env.grid_size, env.w.extra["origin"]
+    pos0 = {a: env.pos[a].copy() for a in env.agents}
+    inside0 = ~env.people.outside
+    ppl0 = env.people.pos.copy()
+    env._expand()
+    v = env.views["base"]
+    assert env.grid_size == 2 * g0 and env.grid_epoch == 1
+    np.testing.assert_allclose(v.B.sum(axis=(1, 2)) + v.out, mass0, rtol=1e-9)
+    for a in pos0:
+        assert tuple(env.pos[a]) == (pos0[a][0] + ox, pos0[a][1] + oy)
+    assert (env.people.pos[inside0] == ppl0[inside0] + [ox, oy]).all()
+    assert v.B.shape[-1] == env.grid_size and env.G_true.shape[-3] == env.grid_size
+
+
+def test_expand_mid_mission_runs_to_the_end():
+    env = _grown_env(3)
+    pol = Lawnmower()
+    pol.reset(env)
+    while env.agents:
+        if env.t == 10:
+            env._expand()
+        obs, *_ = env.step(pol.act(env))
+    assert env.grid_size == 128 and env.metrics()["expanded_min"] is not None
+
+
+def test_people_outside_come_back_when_the_area_grows():
+    from dataclasses import replace
+    from swarmsearch.evaluate import FIELD_CONDITIONS
+    for seed in range(60):
+        sc = replace(FIELD_CONDITIONS["wild_mix"](seed), expand=True)
+        env = FieldEnv()
+        env.reset(seed=seed, options={"scenario": sc})
+        G, o = env.w.extra["big"].g, np.array(env.w.extra["origin"])
+        f = env.people.far + o
+        back = env.people.outside & np.isfinite(f[:, 0]) & ((f >= 0) & (f < G)).all(1)
+        if back.any():
+            env._expand()
+            assert not env.people.outside[back].any()
+            for x, y in env.people.pos[back]:
+                assert env.w.walk[y, x]
+            return
+    raise AssertionError("no seed had someone outside who the grown area covers")

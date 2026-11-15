@@ -34,6 +34,7 @@ from ..belief import propagate
 from ..env import (CLEAR_WEIGHT, FIND_TIME_REWARD, MAX_DRONES, MOVES, N_TEAMMATES, PENALTY_COLLISION,
                    PENALTY_STEP, REWARD_DETECT, WEIGHT_FLOOR, GridSearchEnv, View)
 from ..obstacles import distance_fields
+from . import lpb
 from . import people as pp
 from . import sensing as sn
 from .params import FAMILY, FieldSampler, FieldScenario
@@ -245,6 +246,8 @@ class FieldEnv(GridSearchEnv):
         self.n_alarms = self.n_false_alarms = self.n_bumps = self.n_slips = self.n_gps_off = 0
         self.n_near = self.n_crash = self.n_swaps = self.n_launch_fail = 0
         self.linked_steps = 0.0
+        self.expanded_t = -1  # step at which the search area grew (K2), -1: not yet
+        self.grid_epoch = 0  # bumped when the grid changes (planners re-plan)
         self._update_conditions()
         for a in self.agents:
             self._search(a, HOVER)
@@ -583,6 +586,11 @@ class FieldEnv(GridSearchEnv):
         if self.t == self._aftershock_t:
             self._aftershock()
         self._spread_belief()
+        if sc.expand and self.expanded_t < 0 and "big" in self.w.extra and not self.found.all():
+            self._v = self.views["base"]
+            due = sc.expand_min > 0 and self.t * fam.step_s >= sc.expand_min * 60.0
+            if due or self.p_outside() > sc.expand_at:
+                self._expand()
 
         terminations = {a: not self.alive[a] for a in self.agents}
         truncated = self.t >= fam.max_steps
@@ -599,6 +607,106 @@ class FieldEnv(GridSearchEnv):
         else:
             self.agents = [a for a in self.agents if not terminations[a]]
         return obs, rewards, terminations, truncations, infos
+
+    def _expand(self):
+        """Grow the search area (K2): the base's map now says the person is more
+        likely outside than inside, so the incident commander widens it to the
+        world built EXPAND times wider at launch. Same cells, clock and drones;
+        everything on the old grid is placed at its offset in the new one. The
+        new ring gets the share of each hypothesis's outside mass that the
+        distance data put there; the rest stays outside. People outside whose
+        true spot is now on the map come back in."""
+        big, (ox, oy) = self.w.extra["big"], self.w.extra["origin"]
+        sc, fam, rng = self.scenario, self.fam, self.rng
+        g0, G = self.grid_size, big.g
+        off = np.array([ox, oy])
+        inner = (slice(oy, oy + g0), slice(ox, ox + g0))
+        ring = np.ones((G, G), dtype=bool)
+        ring[inner] = False
+
+        def emb(a, fill):
+            out = np.full((*a.shape[:-2], G, G), fill, dtype=a.dtype)
+            out[(..., *inner)] = a
+            return out
+
+        self.w = big
+        self.grid_size = G
+        self._M = _pool_matrix(G)
+        self.G_true = sn.geo_table(big.surface, big.elev, big.walk, fam.alt_m, fam.foot_r, fam.alt_detect)
+        self.water = big.water.copy()
+        self.smoke = emb(self.smoke, 0.0)
+        self._smoke_shape = emb(self._smoke_shape, 0.0) if isinstance(self._smoke_shape, np.ndarray) else self._smoke_shape
+        self._nofly_static = emb(self._nofly_static, False)
+        if self._tfr is not None:
+            self._tfr = (self._tfr[0], self._tfr[1], emb(self._tfr[2], False))
+        self.nofly = emb(self.nofly, False)
+        self.visited = emb(self.visited, False)
+        self.unseen = emb(self.unseen, False)
+        self.collapsed = emb(self.collapsed, False)
+        # People
+        ppl = self.people
+        ppl.w, ppl.walk, ppl._fields = big, big.walk, {}
+        ppl.pos += off
+        ppl.far += off
+        for i in np.flatnonzero(ppl.outside & np.isfinite(ppl.far[:, 0])):
+            x, y = (int(round(c)) for c in ppl.far[i])
+            if 0 <= x < G and 0 <= y < G:
+                if not big.walk[y, x]:  # nearest walkable cell
+                    cells = np.argwhere(big.walk)
+                    y, x = cells[np.argmin(np.hypot(cells[:, 0] - y, cells[:, 1] - x))]
+                ppl.pos[i] = (x, y)
+                ppl.outside[i] = False
+                ppl.far[i] = np.nan
+                ppl.occ[i] = {}
+        self.survivors = ppl.pos
+        # The maps
+        self.rep_ipp = (self.rep_ipp[0] + ox, self.rep_ipp[1] + oy)
+        names, W, _pw, mps = pp.hypothesis_bank(big, sc, self.rep_ipp, rng)
+        if names != self.hyp_names:
+            raise RuntimeError("hypotheses changed when the area grew")
+        self._W, self._V_moveprob = W, mps
+        # How much of "outside the old area" the distance data put in the new ring (vs beyond it),
+        # spread over the ring like the prior (terrain, direction of travel).
+        raw, beyond = lpb.ring_probability(G, big.cell_m, self.rep_ipp, lpb.CATEGORIES[sc.category]["dist_km"])
+        to_ring = float(raw[ring].sum() / max(raw[ring].sum() + beyond, 1e-300))
+        dens, _ = pp.ring_density(big, sc, self.rep_ipp)
+        ring_dens = np.where(ring, dens, 0.0) / max(dens[ring].sum(), 1e-300)
+        G_map = sn.geo_table(big.map_surface, big.elev, big.map_walk, fam.alt_m, fam.foot_r, fam.alt_detect)
+        for v in self._distinct_views():
+            m = v.map
+            walk, fly, sh = big.map_walk.copy(), ~big.map_fly_block, big.map_struct_h.copy()
+            walk[inner], fly[inner], sh[inner] = m.walk, m.fly, m.struct_h
+            v.map = MapState(walk, fly, sh, big.elev, G_map.copy(), emb(m.rubble, False), emb(m.revealed, False))
+            v.B = emb(v.B, 0.0) + (v.out * to_ring)[:, None, None] * ring_dens[None]
+            v.out = v.out * (1.0 - to_ring)
+            v.N = emb(v.N, 0.0)
+            v.cand_t = emb(v.cand_t, -1e9)
+            v.last_searched = emb(v.last_searched, -1e9)
+            v.finds = {i: (c[0] + ox, c[1] + oy) for i, c in v.finds.items()}
+            v.mates = {a: (p + off, t) for a, (p, t) in v.mates.items()}
+            for it in v.outbox:
+                it["cell"] = (it["cell"][0] + ox, it["cell"][1] + oy)
+            self._v = v
+            self._mix()
+        for it in self.queue.items + [c for c in self.queue.current if c is not None]:
+            it["cell"] = (it["cell"][0] + ox, it["cell"][1] + oy)
+        # Drones and teams
+        for a in self.possible_agents[: sc.n_drones]:
+            if a in self.pos:
+                self.pos[a] = self.pos[a] + off
+                self.true_pos[a] = self.true_pos[a] + off
+                self.history[a] = [h + off for h in self.history[a]]
+                self.trail_t[a] = emb(self.trail_t[a], -1e9)
+        for tm in self.teams:
+            tm["pos"] = tm["pos"] + off
+            tm["patrol"] = 0
+        self._patrol = self._patrol_route(big)
+        self.link_mask = self._link_mask(sc, big)
+        self._fields, self._fields_ver = {}, -1
+        self.map_version += 1
+        self.grid_epoch += 1
+        self.expanded_t = self.t
+        self._update_conditions()
 
     def _fly(self, a, target):
         """Fly the chosen move from the believed cell; wind and GPS decide the truth (D4)."""
@@ -1074,6 +1182,7 @@ class FieldEnv(GridSearchEnv):
             "rescued_frac": float((self.rescued_t >= 0).mean()) if n else 1.0,
             "found_inside_frac": float(self.found[inside].mean()) if inside.any() else 1.0,
             "outside_frac": float(self.people.outside.mean()) if n else 0.0,
+            "expanded_min": self.expanded_t * self.fam.step_s / 60.0 if self.expanded_t >= 0 else None,
             "coverage": float(self.visited[self.w.walk].mean()),
             "repeat_frac": self.n_repeats / max(1, self.n_visits),
             "collisions": self.n_collisions,

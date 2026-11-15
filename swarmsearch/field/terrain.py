@@ -171,7 +171,12 @@ def cheapest_path(cost: np.ndarray, start: tuple[int, int], goal: tuple[int, int
 
 
 # ------------------------------------------------------------- families
-def wilderness(rng, g: int, cell_m: float, map_error: float) -> World:
+def wilderness(rng, g: int, cell_m: float, map_error: float, core: int | None = None) -> World:
+    """Generated wilderness of g cells a side. `core` is the size of the
+    first search area when the world is built larger so the search can grow
+    (K2): drainage thresholds and the trailhead-to-last-seen distance are set
+    by the core, so its centre looks like an ordinary map."""
+    core = core or g
     relief = rng.uniform(150, 500)
     base_n = fbm(rng, g, (16, 8, 4), (1.0, 0.5, 0.25))
     ridge = 1.0 - np.abs(2 * fbm(rng, g, (12, 6), (1.0, 0.4)) - 1.0)
@@ -179,8 +184,8 @@ def wilderness(rng, g: int, cell_m: float, map_error: float) -> World:
     sl = slope(elev, cell_m)
     cliff = sl > CLIFF_SLOPE
     flow, acc = d8_flow(elev)
-    stream = acc >= max(12, g * g // 60)
-    river = acc >= g * g // 6  # deep water: impassable on foot
+    stream = acc >= max(12, core * core // 60)
+    river = acc >= core * core // 6  # deep water: impassable on foot
     water = river.copy()
     walk = ~cliff & ~river
     # Trailhead and command post near the middle (the search area is drawn
@@ -207,7 +212,8 @@ def wilderness(rng, g: int, cell_m: float, map_error: float) -> World:
     # Last seen: on a trail some way from the trailhead.
     tcells = np.argwhere(trail)
     d = np.hypot(tcells[:, 1] - base[0], tcells[:, 0] - base[1])
-    pick = tcells[(d >= 2) & (d <= g // 6)] if ((d >= 2) & (d <= g // 6)).any() else tcells
+    near = (d >= 2) & (d <= core // 6)
+    pick = tcells[near] if near.any() else tcells
     iy, ix = pick[rng.integers(len(pick))]
     # The drones' map: some trail segments missing, canopy map smoothed and noisy (K5).
     map_trail = trail.copy()
@@ -292,6 +298,12 @@ def make_world(rng, sc) -> World:
             raise ValueError(f"site cell size {float(d['cell_m'])} m: set FieldScenario(cell_m={float(d['cell_m'])})")
         return world_from_arrays(d["elev"], d["canopy"], d["trail"], d["water"], float(d["cell_m"]),
                                  tuple(int(v) for v in d["base"]), tuple(int(v) for v in d["ipp"]))
+    if sc.family == "wilderness" and sc.expand:
+        big = wilderness(rng, EXPAND * fam.grid, fam.cell_m, sc.map_error, core=fam.grid)
+        o = tuple(int(np.clip(c - fam.grid // 2, 0, big.g - fam.grid)) for c in big.base)
+        w = crop_world(big, o, fam.grid)
+        w.extra.update(big=big, origin=o)
+        return w
     if sc.family == "wilderness":
         return wilderness(rng, fam.grid, fam.cell_m, sc.map_error)
     if sc.family == "urban":
@@ -299,6 +311,27 @@ def make_world(rng, sc) -> World:
     if sc.family == "flood":
         return flood(rng, fam.grid, fam.cell_m, sc.map_error)
     raise ValueError(sc.family)
+
+
+EXPAND = 2  # the search area can grow to this many times its width (K2)
+
+
+def crop_world(w: World, o: tuple[int, int], size: int) -> World:
+    """The size x size window of w whose top-left cell is o (x, y)."""
+    x0, y0 = o
+    sl = (slice(y0, y0 + size), slice(x0, x0 + size))
+
+    def cut(a):
+        if isinstance(a, np.ndarray) and a.ndim >= 2 and a.shape[-2:] == (w.g, w.g):
+            return a[(..., *sl)].copy()
+        return a
+
+    def shift(c):
+        return (int(np.clip(c[0] - x0, 0, size - 1)), int(np.clip(c[1] - y0, 0, size - 1)))
+
+    kw = {f: cut(getattr(w, f)) for f in w.__dataclass_fields__}
+    kw.update(g=size, base=shift(w.base), ipp=shift(w.ipp), shelters=[shift(c) for c in w.shelters], extra={})
+    return World(**kw)
 
 
 def world_from_arrays(elev: np.ndarray, canopy: np.ndarray, trail: np.ndarray, water: np.ndarray,

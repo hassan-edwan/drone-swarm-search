@@ -140,15 +140,23 @@ class FieldScenario:
     force: str = ""  # "", "unresponsive", "evasive", "outside", "off_model"
     corner_cutting: bool = True  # interface field shared with the grid scenarios
     site: str = ""  # wilderness: real map layers from scripts/import_site.py instead of generated terrain
+    # Growing the search (K2): wilderness only. The world is built EXPAND times wider;
+    # the drones start on the centre and the area grows once their map puts the
+    # person more likely outside than inside (or at a set time).
+    expand: bool = False
+    expand_at: float = 0.5  # the map's chance the person is outside the area that triggers growth
+    expand_min: float = 0.0  # also grow at this mission minute (an operational-period boundary; 0: off)
+    mission_s: float = 0.0  # mission length in seconds (0: the family's default)
 
     @property
     def fam(self) -> Family:
         if self.family != "wilderness":
             return FAMILY[self.family]
         cell = self.cell_m or wilderness_cell_m(self.category)
-        key = round(cell, 3)
+        mission = self.mission_s or WILDERNESS_MISSION_S
+        key = (round(cell, 3), round(mission, 1))
         if key not in _SCALED:
-            _SCALED[key] = WILDERNESS.scaled(cell, WILDERNESS_MISSION_S)
+            _SCALED[key] = WILDERNESS.scaled(cell, mission)
         return _SCALED[key]
 
     # Names shared with the grid scenarios (evaluation, baselines).
@@ -169,12 +177,20 @@ class FieldSampler:
     field: bool = True
     grid_size: int = 64  # largest map; each mission uses its family's size
     max_steps: int = 1100
+    expand_share: float = 0.0  # wilderness missions whose area can grow (K2)
+    long_share: float = 0.0  # wilderness missions run as a long operation (long_s) instead of one flight period
+    long_s: float = 4 * 3600.0
 
     def sample(self, rng: np.random.Generator) -> FieldScenario:
         names = list(self.families)
         p = np.array([self.families[n] for n in names], float)
         fam = FAMILY[names[rng.choice(len(names), p=p / p.sum())]]
-        return sample_scenario(rng, fam.name)
+        sc = sample_scenario(rng, fam.name)
+        if fam.name == "wilderness" and (self.expand_share > 0 or self.long_share > 0):
+            long = bool(rng.random() < self.long_share)
+            sc = replace(sc, expand=bool(rng.random() < self.expand_share),
+                         expand_at=float(rng.uniform(0.4, 0.7)), mission_s=self.long_s if long else 0.0)
+        return sc
 
 
 def sample_scenario(rng: np.random.Generator, family: str, **override) -> FieldScenario:
@@ -203,7 +219,7 @@ def sample_scenario(rng: np.random.Generator, family: str, **override) -> FieldS
         hours_lost=float(u(0.5, 12)) if family == "wilderness" else float(u(0.2, 6)),
         hypothermic=float(u(0.0, 0.3)),
         ipp_err_m=float(u(30, 500)), ipp_wrong=bool(rng.random() < 0.1), d50_scale=float(np.exp(rng.normal(0, 0.35))),
-        p_outside=float(u(0.0, 0.05)),  # beyond what the distance data already put outside phone_ping=bool(rng.random() < 0.1), map_error=float(u(0.0, 0.4)),
+        p_outside=float(u(0.0, 0.05)),  # beyond what the distance data already put outside
         profile_told=bool(rng.random() < 0.3),
         sensor_scale=float(u(0.4, 1.1)), fa_scale=float(u(0.5, 3.0)), light=light, hour=hour,
         air_c=float(u(-5, 35)), rain=float(u(0, 0.4)), n_operators=int(rng.integers(1, 3)),
@@ -219,4 +235,7 @@ def sample_scenario(rng: np.random.Generator, family: str, **override) -> FieldS
         collapse_frac=float(u(0, 0.5)), aftershock=float(u(0, 0.3)), smoke=float(u(0, 0.6)),
         water_rise=float(u(0, 2.0)),
     )
+    # Drawn last so the draws above (and so every earlier scenario) are unchanged: these two
+    # were lost to a comment until 2026-11-15 and every mission used the defaults.
+    sc = replace(sc, phone_ping=bool(rng.random() < 0.1), map_error=float(u(0.0, 0.4)))
     return replace(sc, **override) if override else sc
