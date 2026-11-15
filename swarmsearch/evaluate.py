@@ -157,8 +157,46 @@ FIELD_CONDITIONS = {
     "wild_hard_radio": _field("wilderness", comm_range_m=300.0, rtb_on_link_loss=True),
     "wild_hard_off_model": _field("wilderness", force="off_model"),
 }
+# M8 mission suite for Phase 2 (docs/MISSIONS.md): one effect turned up at a
+# time on top of the randomised family, so a result can be traced to a cause.
+# Same seeds as FIELD_CONDITIONS. Flood missions stay held out of training.
+_LONG = 4 * 3600.0
+FIELD_MISSIONS = {
+    # Who is lost (ISRID categories: distance, behaviour, response, survival)
+    "wild_hiker": _field("wilderness", category="hiker"),
+    "wild_hunter": _field("wilderness", category="hunter"),
+    "wild_child": _field("wilderness", category="child_7_12"),
+    "wild_dementia": _field("wilderness", category="dementia"),
+    "wild_despondent": _field("wilderness", category="despondent"),
+    "wild_group": _field("wilderness", n_people=3, group_size=3),
+    "wild_phone_ping": _field("wilderness", phone_ping=True),
+    # Conditions
+    "wild_night": _field("wilderness", light="night", hour=2.0),
+    "wild_cold_night": _field("wilderness", light="night", hour=3.0, air_c=-8.0, hypothermic=0.5),
+    "wild_rain": _field("wilderness", rain=0.8),
+    "wild_wind": _field("wilderness", wind_mps=11.0, gust=0.3),
+    "wild_dense_forest": _field("wilderness", map_error=0.4, fa_scale=2.5),
+    # Fleet and airspace
+    "wild_two_drones": _field("wilderness", n_drones=2),
+    "wild_eight_drones": _field("wilderness", n_drones=8),
+    "wild_short_battery": _field("wilderness", endurance_min=25.0, swap_s=300.0),
+    "wild_airspace": _field("wilderness", n_nofly=3, p_tfr=1.0),
+    # Long operations and a growing area (K2)
+    "wild_long_fixed": _field("wilderness", mission_s=_LONG, expand=True, expand_at=9.0),
+    "wild_long_expand": _field("wilderness", mission_s=_LONG, expand=True, expand_at=0.5),
+    "wild_long_expand_2h": _field("wilderness", mission_s=_LONG, expand=True, expand_at=9.0, expand_min=120.0),
+    # Urban collapse
+    "urban_heavy_collapse": _field("urban", collapse_frac=0.6),
+    "urban_aftershock": _field("urban", aftershock=1.0),
+    "urban_smoke": _field("urban", smoke=1.0),
+    "urban_night": _field("urban", light="night", hour=2.0),
+    "urban_radio": _field("urban", comm_range_m=200.0, tether_relay=False),
+    # Flood (held out of training)
+    "flood_rising_heldout": _field("flood", water_rise=2.0),
+    "flood_night_heldout": _field("flood", light="night", hour=2.0),
+}
 ALL_CONDITIONS = {**CONDITIONS, **SPEED_SWEEP, **M2_CONDITIONS, **M4_CONDITIONS, **M5_CONDITIONS, **CAMERA_CONDITIONS,
-                  **REAL_CONDITIONS, **FIELD_CONDITIONS}
+                  **REAL_CONDITIONS, **FIELD_CONDITIONS, **FIELD_MISSIONS}
 
 
 def run_episode(env: GridSearchEnv, policy, scenario: Scenario, seed: int) -> dict:
@@ -169,9 +207,49 @@ def run_episode(env: GridSearchEnv, policy, scenario: Scenario, seed: int) -> di
     return env.metrics()
 
 
-def evaluate(policies: dict, conditions: dict | None = None, n_episodes: int = 50, grid_size: int = 20):
-    """Returns {condition: {method: summary}}."""
+_EVAL: tuple | None = None  # (policies, conditions) shared with forked workers
+_ENVS: dict = {}
+
+
+def _env_for(sc0):
+    from .envs import is_field
+    if is_field(sc0):
+        from .field.env import FieldEnv
+        return _ENVS.setdefault("field", FieldEnv(sc0))
+    g = sc0.grid_size
+    return _ENVS.setdefault((g, sc0.camera, sc0.real),
+                            GridSearchEnv(Scenario(grid_size=g, camera=sc0.camera, real=sc0.real)))
+
+
+def _eval_task(task):
+    cname, pname, seed = task
+    policies, conditions = _EVAL
+    make = conditions[cname]
+    return cname, pname, seed, run_episode(_env_for(make(0)), policies[pname], make(seed), seed=seed)
+
+
+def _worker_init():
+    import torch
+    torch.set_num_threads(1)
+
+
+def evaluate(policies: dict, conditions: dict | None = None, n_episodes: int = 50, grid_size: int = 20,
+             workers: int = 1):
+    """Returns {condition: {method: summary}}. With workers > 1 the missions
+    run in that many processes (forked, so policies and conditions are shared
+    as they are); results are the same as with one."""
     conditions = conditions or CONDITIONS
+    if workers > 1:
+        import multiprocessing as mp
+        global _EVAL
+        _EVAL = (policies, conditions)
+        tasks = [(c, p, s) for c in conditions for p in policies for s in range(n_episodes)]
+        with mp.get_context("fork").Pool(workers, initializer=_worker_init) as pool:
+            out = pool.map(_eval_task, tasks, chunksize=1)
+        rows: dict = {}
+        for c, p, s, r in sorted(out, key=lambda x: x[2]):
+            rows.setdefault(c, {}).setdefault(p, []).append(r)
+        return {c: {p: summarise(rows[c][p], conditions[c](0).max_steps) for p in policies} for c in conditions}
     envs: dict[tuple[int, bool], GridSearchEnv] = {}
     results = {}
     for cname, make in conditions.items():

@@ -193,6 +193,7 @@ class Config:
     out_dir: str = "runs/mappo"
     ckpt_every: int = 25  # updates between resumable checkpoints (model, optimizer, counters, RNG)
     resume: bool = False  # continue from out_dir/ckpt.pt if it exists
+    workers: int = 0  # processes running the environments (0: in this process, the original loop)
     sampler: ScenarioSampler = field(default_factory=ScenarioSampler)
 
 
@@ -217,11 +218,17 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     guided = guide is not None
     from .envs import is_field, make_env
     field = is_field(cfg.sampler)
-    envs = [make_env(sampler=cfg.sampler, seed=int(rng.integers(1 << 31)), full_map=cfg.arch != "mlp",
-                     guided=guided, team=cfg.team)
-            for _ in range(cfg.n_envs)]
-    for e in envs:
+    seeds = [int(rng.integers(1 << 31)) for _ in range(cfg.n_envs)]
+
+    def make(seed):
+        e = make_env(sampler=cfg.sampler, seed=seed, full_map=cfg.arch != "mlp", guided=guided, team=cfg.team)
         e.reward = cfg.reward
+        return e
+
+    use_vec = cfg.workers > 0
+    if use_vec and guided:
+        raise ValueError("worker processes do not support a guide")
+    envs = [make(seeds[0])] if use_vec else [make(s) for s in seeds]  # with workers: one probe env here
     g = envs[0].grid_size
     dev = torch.device(cfg.device)
     camera, real = cfg.sampler.camera, cfg.sampler.real
@@ -256,10 +263,15 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
         "valid": np.zeros((T, E, A), np.float32),
     }
 
-    cur = []
-    for e in envs:
-        obs, infos = e.reset()
-        cur.append((obs, infos))
+    from .vec import VecEnvs
+    venv = VecEnvs(make, seeds, centralized, vec, cfg.workers) if use_vec else None
+    if use_vec:
+        pks = venv.reset()
+    else:
+        cur = []
+        for e in envs:
+            obs, infos = e.reset()
+            cur.append((obs, infos))
 
     out = Path(cfg.out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -272,9 +284,13 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
         start, env_steps, secs0 = ck["update"] + 1, ck["env_steps"], ck["secs"]
         torch.set_rng_state(ck["torch_rng"])
         rng.bit_generator.state = ck["np_rng"]
-        for e, st in zip(envs, ck["env_rngs"]):
-            e.rng.bit_generator.state = st
-        cur = [e.reset() for e in envs]  # episodes in flight are not saved: start fresh ones
+        if use_vec:  # episodes in flight are not saved: start fresh ones
+            venv.set_rng_states(ck["env_rngs"])
+            pks = venv.reset()
+        else:
+            for e, st in zip(envs, ck["env_rngs"]):
+                e.rng.bit_generator.state = st
+            cur = [e.reset() for e in envs]
         print(f"resumed from {ck_path} at update {ck['update']} ({env_steps} steps)", flush=True)
     elif cfg.resume:
         print(f"no checkpoint at {ck_path}: starting from scratch", flush=True)
@@ -298,6 +314,64 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
             e, (_, infos) = envs[ei], cur[ei]
             cur[ei] = ({a: e._obs(a) for a in e.agents}, infos)
 
+    def vec_rollout(pks):
+        """One rollout over all environments in the worker processes: every
+        drone of every environment in one network call per step."""
+        mets, n = [], 0
+        for t in range(T):
+            live = [i for i, pk in enumerate(pks) if pk["agents"]]
+            cuts = np.cumsum([len(pks[i]["agents"]) for i in live])[:-1]
+            O = np.concatenate([pks[i]["o"] for i in live])
+            Mk = np.concatenate([pks[i]["m"] for i in live])
+            C = np.concatenate([pks[i]["c"] for i in live])
+            with torch.no_grad():
+                d = net.dist(T_(O), T_(Mk))
+                act = d.sample()
+                logp = d.log_prob(act).cpu().numpy()
+                val = net.value(T_(C)).cpu().numpy()
+                act = act.cpu().numpy()
+            per = {i: (a_, l_, v_) for i, a_, l_, v_ in
+                   zip(live, np.split(act, cuts), np.split(logp, cuts), np.split(val, cuts))}
+            out = venv.step([per[i][0] if i in per else np.zeros(0, int) for i in range(len(pks))])
+            boots = []
+            for ei, (res, _npk) in enumerate(out):
+                if ei not in per:
+                    continue
+                pk, (a_, l_, v_) = pks[ei], per[ei]
+                for j, i in enumerate(pk["idx"]):
+                    buf["obs"][t, ei, i] = pk["o"][j]
+                    buf["cin"][t, ei, i] = pk["c"][j]
+                    buf["mask"][t, ei, i] = pk["m"][j]
+                    buf["act"][t, ei, i] = a_[j]
+                    buf["logp"][t, ei, i] = l_[j]
+                    buf["val"][t, ei, i] = v_[j]
+                    buf["rew"][t, ei, i] = res["rew"][j] * cfg.reward_scale
+                    buf["valid"][t, ei, i] = 1.0
+                    if res["term"][j] or res["trunc"][j]:
+                        buf["term"][t, ei, i] = 1.0
+                    if j in res["boot"]:
+                        boots.append((ei, i, res["boot"][j]))
+                n += 1
+                if res["metrics"] is not None:
+                    mets.append(res["metrics"])
+            if boots:
+                with torch.no_grad():
+                    bv = net.value(T_(np.stack([b_[2] for b_ in boots]))).cpu().numpy()
+                for (ei, i, _), v_ in zip(boots, bv):
+                    buf["boot"][t, ei, i] = v_
+            pks = [npk for _, npk in out]
+        last = np.zeros((E, A), np.float32)
+        live = [i for i, pk in enumerate(pks) if pk["agents"]]
+        if live:
+            with torch.no_grad():
+                lv = net.value(T_(np.concatenate([pks[i]["c"] for i in live]))).cpu().numpy()
+            k = 0
+            for i in live:
+                for idx in pks[i]["idx"]:
+                    last[i, idx] = lv[k]
+                    k += 1
+        return pks, last, n, mets
+
     for update in range(start, n_updates + 1):
         for k in buf:
             buf[k].fill(0)
@@ -306,58 +380,63 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
             coef = cfg.guide_coef * max(0.0, 1.0 - frac)
             for e in envs:
                 e.guide_coef = coef
-        for t in range(T):
-            if guided:
-                replan()
-            for ei, env in enumerate(envs):
-                obs, infos = cur[ei]
-                agents = list(env.agents)
-                idx = [int(a.split("_")[1]) for a in agents]
-                o = np.stack([obs[a] for a in agents])
-                m = np.stack([infos[a]["action_mask"] for a in agents]).astype(np.float32)
-                state = env.state() if centralized else None
-                c = np.stack([critic_input(env, obs[a], centralized, state, vec) for a in agents])
-                with torch.no_grad():
-                    d = net.dist(T_(o), T_(m))
-                    act = d.sample()
-                    logp = d.log_prob(act).cpu().numpy()
-                    val = net.value(T_(c)).cpu().numpy()
-                    act = act.cpu().numpy()
-                acts = {a: int(x) for a, x in zip(agents, act)}
-                nobs, rew, term, trunc, ninfos = env.step(acts)
-                for j, (a, i) in enumerate(zip(agents, idx)):
-                    buf["obs"][t, ei, i] = o[j]
-                    buf["cin"][t, ei, i] = c[j]
-                    buf["mask"][t, ei, i] = m[j]
-                    buf["act"][t, ei, i] = act[j]
-                    buf["logp"][t, ei, i] = logp[j]
-                    buf["val"][t, ei, i] = val[j]
-                    buf["rew"][t, ei, i] = rew[a] * cfg.reward_scale
-                    buf["valid"][t, ei, i] = 1.0
-                    if term[a]:
-                        buf["term"][t, ei, i] = 1.0
-                    elif trunc[a]:
-                        buf["term"][t, ei, i] = 1.0
-                        nstate = env.state() if centralized else None
-                        cin = critic_input(env, nobs[a], centralized, nstate, vec)
-                        with torch.no_grad():
-                            buf["boot"][t, ei, i] = float(net.value(T_(cin[None]))[0])
-                env_steps += 1
-                if not env.agents:
-                    ep_metrics.append(env.metrics())
-                    cur[ei] = env.reset()
-                else:
-                    cur[ei] = (nobs, ninfos)
+        if use_vec:
+            pks, last_val, n_steps, mets = vec_rollout(pks)
+            env_steps += n_steps
+            ep_metrics += mets
+        else:
+            for t in range(T):
+                if guided:
+                    replan()
+                for ei, env in enumerate(envs):
+                    obs, infos = cur[ei]
+                    agents = list(env.agents)
+                    idx = [int(a.split("_")[1]) for a in agents]
+                    o = np.stack([obs[a] for a in agents])
+                    m = np.stack([infos[a]["action_mask"] for a in agents]).astype(np.float32)
+                    state = env.state() if centralized else None
+                    c = np.stack([critic_input(env, obs[a], centralized, state, vec) for a in agents])
+                    with torch.no_grad():
+                        d = net.dist(T_(o), T_(m))
+                        act = d.sample()
+                        logp = d.log_prob(act).cpu().numpy()
+                        val = net.value(T_(c)).cpu().numpy()
+                        act = act.cpu().numpy()
+                    acts = {a: int(x) for a, x in zip(agents, act)}
+                    nobs, rew, term, trunc, ninfos = env.step(acts)
+                    for j, (a, i) in enumerate(zip(agents, idx)):
+                        buf["obs"][t, ei, i] = o[j]
+                        buf["cin"][t, ei, i] = c[j]
+                        buf["mask"][t, ei, i] = m[j]
+                        buf["act"][t, ei, i] = act[j]
+                        buf["logp"][t, ei, i] = logp[j]
+                        buf["val"][t, ei, i] = val[j]
+                        buf["rew"][t, ei, i] = rew[a] * cfg.reward_scale
+                        buf["valid"][t, ei, i] = 1.0
+                        if term[a]:
+                            buf["term"][t, ei, i] = 1.0
+                        elif trunc[a]:
+                            buf["term"][t, ei, i] = 1.0
+                            nstate = env.state() if centralized else None
+                            cin = critic_input(env, nobs[a], centralized, nstate, vec)
+                            with torch.no_grad():
+                                buf["boot"][t, ei, i] = float(net.value(T_(cin[None]))[0])
+                    env_steps += 1
+                    if not env.agents:
+                        ep_metrics.append(env.metrics())
+                        cur[ei] = env.reset()
+                    else:
+                        cur[ei] = (nobs, ninfos)
 
-        # Bootstrap values for agents still running at the end of the rollout.
-        last_val = np.zeros((E, A), np.float32)
-        for ei, env in enumerate(envs):
-            obs, _ = cur[ei]
-            state = env.state() if centralized else None
-            for a in env.agents:
-                cin = critic_input(env, obs[a], centralized, state, vec)
-                with torch.no_grad():
-                    last_val[ei, int(a.split("_")[1])] = float(net.value(T_(cin[None]))[0])
+            # Bootstrap values for agents still running at the end of the rollout.
+            last_val = np.zeros((E, A), np.float32)
+            for ei, env in enumerate(envs):
+                obs, _ = cur[ei]
+                state = env.state() if centralized else None
+                for a in env.agents:
+                    cin = critic_input(env, obs[a], centralized, state, vec)
+                    with torch.no_grad():
+                        last_val[ei, int(a.split("_")[1])] = float(net.value(T_(cin[None]))[0])
 
         adv = np.zeros((T, E, A), np.float32)
         gae = np.zeros((E, A), np.float32)
@@ -426,12 +505,15 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
         if update % 50 == 0 or update == n_updates:
             save(net, cfg, out / "model.pt")
         if update % cfg.ckpt_every == 0 or update == n_updates:
-            save_checkpoint(ck_path, net, opt, cfg, update, env_steps, time.time() - t0, rng, envs)
+            env_rngs = venv.rng_states() if use_vec else [e.rng.bit_generator.state for e in envs]
+            save_checkpoint(ck_path, net, opt, cfg, update, env_steps, time.time() - t0, rng, env_rngs)
     log_f.close()
+    if venv is not None:
+        venv.close()
     return net
 
 
-def save_checkpoint(path: Path, net, opt, cfg: Config, update: int, env_steps: int, secs: float, rng, envs):
+def save_checkpoint(path: Path, net, opt, cfg: Config, update: int, env_steps: int, secs: float, rng, env_rngs):
     """Everything needed to continue training exactly where it stopped (except
     the episodes in flight). Written to a temporary file and renamed, so a
     crash mid-write never leaves a broken checkpoint."""
@@ -441,7 +523,7 @@ def save_checkpoint(path: Path, net, opt, cfg: Config, update: int, env_steps: i
     torch.save({"state_dict": {k: v.cpu() for k, v in net.state_dict().items()}, "optimizer": opt.state_dict(),
                 "config": c, "update": update, "env_steps": env_steps, "secs": secs,
                 "torch_rng": torch.get_rng_state(), "np_rng": rng.bit_generator.state,
-                "env_rngs": [e.rng.bit_generator.state for e in envs]}, tmp)
+                "env_rngs": env_rngs}, tmp)
     os.replace(tmp, path)
 
 
