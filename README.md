@@ -7,12 +7,12 @@ split the area when they don't, re-check where survivors may have moved, and
 cover for a lost drone. The goal is to find 90% of survivors faster than a
 fixed lawnmower sweep.
 
-**Results and findings: [docs/REPORT.md](docs/REPORT.md).** In short: the
-shared probability map lets the swarm find survivors up to twice as fast as a
-lawnmower sweep when survivors move predictably, the learned policy matches a
-strong hand-written rule built on the same map and generalises to larger grids
-and other team sizes, and the missions fly in 3D (PyBullet Crazyflies) with
-gusts up to about 2 m/s².
+**Results and findings: [docs/REPORT.md](docs/REPORT.md)**, written as the
+project's progression from a 200 m grid world to realistic field missions.
+In short: the shared probability map gives most of the gain; the learned
+policy matches a strong hand-written rule on that map; the rule is near
+optimal only while the world matches its model; and each step towards
+realism (camera, real-world gaps, lost-person data) changed the answer.
 
 ## Milestones
 
@@ -22,8 +22,10 @@ gusts up to about 2 m/s².
 | M2 | 2D grid with obstacles | Done (`models/m2_2m.pt`, fine-tuned from M1) |
 | M3 | 3D in gym-pybullet-drones, policy waypoints flown by PID; wind | Done (`results/m3`) |
 | M4 | 3D with buildings flown round | Done (`results/m4`) |
-| M5 | Generality and search speed: find-time metric, belief-greedy baseline, larger grids and other team sizes, imitation + RL, team layers, memory | Done (`results/m5`, report §4.2, §4.4) |
-| — | 3D camera with visual blockers; limited communication; RL flight controller | Future work |
+| M5 | Generality and search speed: find-time metric, belief-greedy baseline, larger grids and other team sizes, imitation + RL, team layers, memory | Done (`results/m5`) |
+| M6 | Camera: flying height, line of sight, cover, false alarms, light; find-time reward | Done (`results/m6`) |
+| M7 | Real-world gaps: sensor mismatch, unknown collapses, radio, position error, mixed behaviour | Done (`swarmsearch/realism.py`) |
+| M8 | Field environment (urban, wilderness, flood) built to [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md), with ISRID lost-person data | Built; evaluation queued |
 
 ## Layout
 
