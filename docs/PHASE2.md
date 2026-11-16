@@ -40,7 +40,7 @@ seeds and a larger evaluation.
 
 | Job | Resources (edit the `#SBATCH` lines) |
 |---|---|
-| imitate | 32 CPUs, 64 GB, 12 h |
+| imitate | 32 CPUs, 128 GB, 12 h |
 | train | an array with one task per seed; 64 CPUs, 64 GB, 24 h each |
 | evaluate | 64 CPUs, 12 h |
 
@@ -87,22 +87,47 @@ missions per round, four rounds come to about 12 GB in memory.
 | `N_ENVS` | 128 | Missions in flight per update: about 30–120 finished missions per update instead of 1–4 |
 | `RL_STEPS` | 100M | 25× Phase 1 |
 | `SEEDS` | 0 1 2 | Spread between seeds is part of the result |
-| `BC_COEF`, `BC_ANNEAL` | 0.3, 1e6 | The pull towards the copy stays on (no drift) |
+| `ARCH`, `PLAN` | mlp, `--plan-feats` | The pooled map plus what the rule ranks by (best value per step of travel in each direction). Chosen by the comparison below |
+| `IMITATE_EVERY` | 1 | Keep every step for the MLP; use 4 with `ARCH=cnn` (a full-map sample is about 12 KB) |
+| `BC_COEF`, `BC_ANNEAL`, `BC_FLOOR` | 0.3, 1.0, 0.2 | The pull towards the copy falls over the run to a fifth, never to zero: room to improve on the rule without the Phase 1 drift |
+| `GAMMA` | 0.995 | Missions run 300–1,100 steps (800 in 4-hour operations); 0.99 sees about 100 steps ahead |
+| `REWARD_NORM` | `--reward-norm` | Rewards scaled per family; urban missions pay many more finds than wilderness ones |
+| `VAL_EVERY`, `VAL_EPISODES` | 50, 16 | Fixed validation missions; the best model is kept as `best.pt` and is the one evaluated |
 | `EXPAND_SHARE`, `LONG_SHARE` | 0.3, 0.3 | Growing areas and long operations come up often enough to learn |
 | `EVAL_EPISODES` | 200 | ±3% on a found-share, against ±6–7% with 50 |
 
+## Choosing what the policy sees
+
+Four imitation set-ups were compared on the same small budget (60 missions per
+round, three DAgger rounds), each copy evaluated greedily on 40 missions.
+Labels are tie-aware: when the rule has several equally good moves, any of
+them counts as right.
+
+| Set-up | Agreement | wild_mix found | wild_drones_only found | urban_mix found |
+|---|---|---|---|---|
+| Rule (BeliefGreedy) | — | 22% | 19% | 69% |
+| A: MLP, one label per step | 54.3% | 24% | 22% | 57% |
+| B: MLP, tie-aware labels | 54.4% | 25% | 20% | 56% |
+| C: MLP, tie-aware, planning features | 54.5% | 23% | 22% | **67%** |
+| D: full-map CNN, planning features (every 2nd step) | **57.2%** | 19% | 14% | 61% |
+
+With 40 missions a found-share is ±6–7%, so the wilderness rows are all ties
+with the rule. Urban separates them: without planning features the copies
+fall 12 points behind the rule; with them (C) the copy is within 2 points.
+The CNN matched the rule's moves best but flew worse, on half as many
+samples; at cluster scale it may catch up, so it stays an option
+(`ARCH=cnn IMITATE_EVERY=4`). Results: `runs/p2_compare/`.
+
 ## What to try if the policy still only matches the rule
 
-1. **Give the policy the whole map.** `--arch cnn` reads the full probability
-   map rather than its pooled summary; the copy should then match the rule
-   more closely. Imitation does not support it yet: `imitate.py` builds the
-   MLP only, and the field environment's full-map observation has not been
-   tested.
-2. **Let the pull shrink to a floor** instead of holding it fixed: for
-   example, `--bc-anneal 1.0` with a minimum weight. A minimum weight is not
-   implemented; it would be a few lines in `mappo.py` where `kl_coef` is set.
+1. **The full-map network with more data:** `ARCH=cnn IMITATE_EVERY=4`.
+2. **A lower floor on the pull** (`BC_FLOOR=0.1`), or a larger entropy
+   bonus, so reinforcement learning can move further from the rule.
 3. **Score on what can be found.** Use "found (inside area)" next to "found";
    no policy can find someone beyond the area.
+4. **Not yet built:** a curriculum from easy to hard missions; a reward for
+   rescue time rather than find time; clues given to the policy directly
+   rather than only through the map.
 
 ## Known limits carried into Phase 2
 
