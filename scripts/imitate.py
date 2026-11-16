@@ -43,6 +43,11 @@ def main():
                    help="field: share of wilderness missions run as 4-hour operations")
     p.add_argument("--field", nargs="*", default=None, metavar="FAMILY",
                    help="M8 field environment on these families (default: wilderness urban)")
+    p.add_argument("--arch", choices=["mlp", "cnn"], default="mlp", help="field: cnn reads the whole map")
+    p.add_argument("--plan-feats", action="store_true", help="field: planning features in the observation")
+    p.add_argument("--every", type=int, default=1, help="keep every n-th step (full-map samples are about 12 KB)")
+    p.add_argument("--hard-labels", action="store_true",
+                   help="learn the rule's one action instead of any of its equally good ones")
     p.add_argument("--out", default="models/bc_greedy.pt")
     a = p.parse_args()
 
@@ -54,22 +59,26 @@ def main():
         from swarmsearch.field.params import FieldSampler
         sampler = FieldSampler(families={f: 1.0 for f in (a.field or ["wilderness", "urban"])},
                                expand_share=a.expand_share, long_share=a.long_share)
-    cfg = Config(sampler=sampler, seed=a.seed, out_dir=str(Path(a.out).parent), team=a.team)
-    net = ActorCritic(sampler.grid_size, True, cfg.hidden, team=a.team, camera=a.camera, real=a.real,
-                      field=a.field is not None)
+    cfg = Config(sampler=sampler, seed=a.seed, out_dir=str(Path(a.out).parent), team=a.team, arch=a.arch,
+                 plan_feats=a.plan_feats)
+    net = ActorCritic(sampler.grid_size, True, cfg.hidden, arch=a.arch, team=a.team, camera=a.camera, real=a.real,
+                      field=a.field is not None, plan=a.plan_feats)
+    kw = dict(arch=a.arch, plan=a.plan_feats, every=a.every)
     data = None
     t0 = time.time()
     for r, beta in enumerate(a.betas):
-        O, M, A, ms = collect(sampler, a.episodes, a.seed * 100 + r, None if r == 0 else net, beta, a.workers, a.team)
+        O, M, A, S, ms = collect(sampler, a.episodes, a.seed * 100 + r, None if r == 0 else net, beta, a.workers,
+                                 a.team, **kw)
         ft = np.mean([m["find_time_frac"] for m in ms])
         print(f"round {r} beta {beta}: {len(A)} samples, rollout find time {ft:.0%} of budget, "
               f"found {np.mean([m['found_frac'] for m in ms]):.0%} ({time.time() - t0:.0f}s)", flush=True)
-        data = (O, M, A) if data is None else tuple(np.concatenate([d, x]) for d, x in zip(data, (O, M, A)))
-        acc = fit(net, *data, epochs=a.epochs)
-        print(f"round {r}: fit on {len(data[2])} samples, accuracy {acc:.1%}", flush=True)
+        data = (O, M, A, S) if data is None else tuple(np.concatenate([d, x]) for d, x in zip(data, (O, M, A, S)))
+        acc = fit(net, *data[:3], None if a.hard_labels else data[3], epochs=a.epochs)
+        print(f"round {r}: fit on {len(data[2])} samples, agreement {acc:.1%} "
+              f"({data[3].sum(1).mean():.2f} equally good actions per state)", flush=True)
         save(net, cfg, Path(a.out))
     # Last check: the clone alone.
-    _, _, _, ms = collect(sampler, a.episodes // 2, a.seed * 100 + 99, net, 0.0, a.workers, a.team)
+    *_, ms = collect(sampler, a.episodes // 2, a.seed * 100 + 99, net, 0.0, a.workers, a.team, **kw)
     print(f"clone alone: find time {np.mean([m['find_time_frac'] for m in ms]):.0%} of budget, "
           f"found {np.mean([m['found_frac'] for m in ms]):.0%}", flush=True)
 

@@ -26,6 +26,7 @@ def pack(env, obs, infos, centralized: bool, vec: int) -> dict:
     agents = list(env.agents)
     state = env.state() if centralized else None
     return dict(
+        fam=getattr(getattr(env, "scenario", None), "family", "grid"),
         agents=agents,
         idx=[int(a.split("_")[1]) for a in agents],
         o=np.stack([obs[a] for a in agents]) if agents else None,

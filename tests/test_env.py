@@ -486,13 +486,13 @@ def test_imitation_collect_and_fit():
     from swarmsearch.imitation import collect, fit
     from swarmsearch.mappo import ActorCritic
     sampler = ScenarioSampler(obstacle_frac=(0.0, 0.2), max_steps=30)
-    O, M, A, ms = collect(sampler, 2, seed=0, workers=1)
+    O, M, A, S, ms = collect(sampler, 2, seed=0, workers=1)
     assert len(O) == len(M) == len(A) and len(ms) == 2
     assert all(M[i, A[i]] for i in range(len(A)))  # expert labels are valid moves
     net = ActorCritic(20, True)
     acc = fit(net, O, M, A, epochs=2, log=lambda *_: None)
     assert 0.0 <= acc <= 1.0
-    O2, _, A2, _ = collect(sampler, 1, seed=1, net=net, beta=0.0, workers=1)
+    O2, _, A2, _, _ = collect(sampler, 1, seed=1, net=net, beta=0.0, workers=1)
     assert len(O2) == len(A2) > 0
 
 
@@ -634,11 +634,11 @@ def test_camera_imitation_runs():
     from swarmsearch.imitation import collect, fit
     from swarmsearch.mappo import ActorCritic
     s = ScenarioSampler(camera=True, max_steps=15)
-    O, M, A, ms = collect(s, 2, 0, None, 1.0, workers=1)
+    O, M, A, S, ms = collect(s, 2, 0, None, 1.0, workers=1)
     assert M.shape[1] == 11 and A.max() <= 10
     net = ActorCritic(20, True, camera=True)
     assert 0.0 <= fit(net, O, M, A, epochs=1, log=lambda *_: None) <= 1.0
-    O2, _, _, _ = collect(s, 2, 1, net, 0.0, workers=1)
+    O2, _, _, _, _ = collect(s, 2, 1, net, 0.0, workers=1)
     assert O2.shape[1] == O.shape[1]
 
 

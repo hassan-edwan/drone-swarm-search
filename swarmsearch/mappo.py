@@ -45,18 +45,20 @@ def mlp(inp: int, out: int, hidden: int = 256) -> nn.Sequential:
 class MapNet(nn.Module):
     """Vector obs through an MLP branch, full map through a CNN branch."""
 
-    def __init__(self, grid_size: int, out: int, hidden: int = 256, vec: int | None = None):
+    def __init__(self, grid_size: int, out: int, hidden: int = 256, vec: int | None = None,
+                 channels: int = MAP_CHANNELS):
         super().__init__()
         self.g = grid_size
+        self.c = channels
         self.vec = vec or obs_dim()
         self.cnn = nn.Sequential(
-            nn.Conv2d(MAP_CHANNELS, 16, 3, padding=1), nn.ReLU(),
+            nn.Conv2d(channels, 16, 3, padding=1), nn.ReLU(),
             nn.Conv2d(16, 32, 3, stride=2, padding=1), nn.ReLU(),
             nn.Conv2d(32, 32, 3, stride=2, padding=1), nn.ReLU(),
             nn.Flatten(),
         )
         with torch.no_grad():
-            n_cnn = self.cnn(torch.zeros(1, MAP_CHANNELS, grid_size, grid_size)).shape[1]
+            n_cnn = self.cnn(torch.zeros(1, channels, grid_size, grid_size)).shape[1]
         self.head = nn.Sequential(
             nn.Linear(self.vec + n_cnn, hidden), nn.Tanh(),
             nn.Linear(hidden, hidden), nn.Tanh(), nn.Linear(hidden, out),
@@ -65,7 +67,7 @@ class MapNet(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         lead = x.shape[:-1]
         x = x.reshape(-1, x.shape[-1])
-        m = x[:, self.vec :].reshape(-1, MAP_CHANNELS, self.g, self.g)
+        m = x[:, self.vec :].reshape(-1, self.c, self.g, self.g)
         h = torch.cat([x[:, : self.vec], self.cnn(m)], dim=-1)
         return self.head(h).reshape(*lead, -1)
 
@@ -122,7 +124,7 @@ def make_body(arch: str, grid_size: int, out: int, hidden: int, tf: dict | None 
 class ActorCritic(nn.Module):
     def __init__(self, grid_size: int, centralized: bool, hidden: int = 256, arch: str = "mlp",
                  tf: dict | None = None, guided: bool = False, team: bool = False, camera: bool = False,
-                 real: bool = False, field: bool = False):
+                 real: bool = False, field: bool = False, plan: bool = False):
         super().__init__()
         self.centralized = centralized
         self.arch = arch
@@ -136,10 +138,21 @@ class ActorCritic(nn.Module):
         self.n_act = n_actions(camera)
         self.state_in = state_dim(grid_size, camera, real)
         self.field = field
+        self.plan = plan
+        self.map_in = map_dim(grid_size) if self.full_map else 0  # size of the map part of the obs
         if field:  # M8: its own observation, 19 actions, fixed-size critic state
-            from .field.env import FIELD_OBS_DIM, FIELD_STATE_DIM, N_ACTIONS_FIELD
-            o = self.vec = FIELD_OBS_DIM
+            from .field.env import (FIELD_MAP_CHANNELS, FIELD_MAP_DIM, FIELD_MAP_RES, FIELD_OBS_DIM,
+                                    FIELD_STATE_DIM, N_ACTIONS_FIELD, PLAN_DIM)
+            o = self.vec = FIELD_OBS_DIM + (PLAN_DIM if plan else 0)
             self.n_act, self.state_in = N_ACTIONS_FIELD, FIELD_STATE_DIM
+            if arch == "cnn":  # the whole map at a fixed size, whatever the grid
+                self.map_in = FIELD_MAP_DIM
+                self.actor = MapNet(FIELD_MAP_RES, self.n_act, hidden, o, FIELD_MAP_CHANNELS)
+                self.critic = mlp(o + self.state_in, 1, hidden) if centralized else MapNet(
+                    FIELD_MAP_RES, 1, hidden, o, FIELD_MAP_CHANNELS)
+                return
+            if arch != "mlp":
+                raise ValueError("field environment: arch must be mlp or cnn")
         self.actor = make_body(arch, grid_size, self.n_act, hidden, tf, o)
         # MAPPO's critic gets the full global state plus the vector obs; IPPO's sees only the local obs.
         self.critic = (mlp(o + self.state_in, 1, hidden) if centralized
@@ -194,6 +207,11 @@ class Config:
     ckpt_every: int = 25  # updates between resumable checkpoints (model, optimizer, counters, RNG)
     resume: bool = False  # continue from out_dir/ckpt.pt if it exists
     workers: int = 0  # processes running the environments (0: in this process, the original loop)
+    plan_feats: bool = False  # field: planning features in the observation (what the rule ranks by)
+    bc_floor: float = 0.0  # the KL pull towards the anchor never falls below this weight
+    reward_norm: bool = False  # scale rewards per scenario family by a running return spread
+    val_every: int = 0  # updates between validation runs (0: none); the best model is kept as best.pt
+    val_episodes: int = 8  # validation missions per family
     sampler: ScenarioSampler = field(default_factory=ScenarioSampler)
 
 
@@ -221,7 +239,8 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     seeds = [int(rng.integers(1 << 31)) for _ in range(cfg.n_envs)]
 
     def make(seed):
-        e = make_env(sampler=cfg.sampler, seed=seed, full_map=cfg.arch != "mlp", guided=guided, team=cfg.team)
+        e = make_env(sampler=cfg.sampler, seed=seed, full_map=cfg.arch != "mlp", guided=guided, team=cfg.team,
+                     plan_feats=cfg.plan_feats)
         e.reward = cfg.reward
         return e
 
@@ -233,7 +252,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     dev = torch.device(cfg.device)
     camera, real = cfg.sampler.camera, cfg.sampler.real
     net = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided, cfg.team, camera, real,
-                      field).to(dev)
+                      field, cfg.plan_feats).to(dev)
     vec = net.vec
     T_ = lambda a: torch.from_numpy(a).to(dev)
     if cfg.init_from:
@@ -243,12 +262,12 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
     anchor = None
     if cfg.bc_anchor:
         anchor = ActorCritic(g, centralized, cfg.hidden, cfg.arch, tf_kwargs(cfg), guided, cfg.team, camera,
-                             real, field).to(dev)
+                             real, field, cfg.plan_feats).to(dev)
         anchor.load_state_dict(torch.load(cfg.bc_anchor, weights_only=False, map_location="cpu")["state_dict"])
         anchor.eval()
 
     T, E, A = cfg.rollout_len, cfg.n_envs, MAX_DRONES
-    o_dim = vec + (map_dim(g) if cfg.arch != "mlp" else 0)
+    o_dim = vec + net.map_in
     c_dim = vec + net.state_in if centralized else o_dim
     buf = {
         "obs": np.zeros((T, E, A, o_dim), np.float32),
@@ -314,6 +333,60 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
             e, (_, infos) = envs[ei], cur[ei]
             cur[ei] = ({a: e._obs(a) for a in e.agents}, infos)
 
+    # Reward scale per scenario family (Config.reward_norm): urban missions pay many
+    # finds, wilderness ones rarely any, so one scale lets urban dominate the updates.
+    # Each family's rewards are divided by the running spread of its discounted returns.
+    rstats: dict = {}
+    ret_acc = np.zeros(E)
+
+    def family_of(env):
+        return getattr(getattr(env, "scenario", None), "family", "grid")
+
+    def rscale(ei, fam, r, done) -> float:
+        if not cfg.reward_norm:
+            return 1.0
+        ret_acc[ei] = ret_acc[ei] * cfg.gamma + r
+        n, mean, m2 = rstats.get(fam, (0, 0.0, 0.0))
+        n += 1
+        d = ret_acc[ei] - mean
+        mean += d / n
+        m2 += d * (ret_acc[ei] - mean)
+        rstats[fam] = (n, mean, m2)
+        if done:
+            ret_acc[ei] = 0.0
+        return 1.0 / float(np.sqrt(m2 / n + 1e-8)) if n > 100 else 1.0
+
+    # Validation (Config.val_every): fixed missions, not the test seeds, flown
+    # greedily; the best model so far is kept as best.pt.
+    best_val = -1.0
+    if cfg.val_every and field:
+        from .evaluate import evaluate as run_eval
+        from .field.params import sample_scenario
+        val_conds = {f: (lambda f_: lambda s_: sample_scenario(np.random.default_rng(90_000 + s_), f_))(f)
+                     for f in cfg.sampler.families}
+        val_f = open(out / "val_log.csv", "a" if resumed else "w", newline="")
+        val_log = csv.writer(val_f)
+        if not resumed:
+            val_log.writerow(["update", "env_steps", *[f"found_{f}" for f in val_conds], "score"])
+        if resumed and (out / "best.pt").exists():
+            best_val = float(torch.load(out / "best.pt", weights_only=False).get("val", -1.0))
+
+    def validate(update):
+        nonlocal best_val
+        net.eval()
+        res = run_eval({"p": LearnedPolicy(net, temperature=0)}, val_conds, n_episodes=cfg.val_episodes,
+                       workers=max(1, cfg.workers))
+        net.train()
+        found = [res[f]["p"]["found_frac"] for f in val_conds]
+        score = float(np.mean(found))
+        val_log.writerow([update, env_steps, *[round(x, 4) for x in found], round(score, 4)])
+        val_f.flush()
+        print(f"[val] upd {update} found " + " ".join(f"{f} {x:.2f}" for f, x in zip(val_conds, found))
+              + f" score {score:.3f} (best {max(best_val, score):.3f})", flush=True)
+        if score > best_val:
+            best_val = score
+            save(net, cfg, out / "best.pt", extra={"val": score, "update": update})
+
     def vec_rollout(pks):
         """One rollout over all environments in the worker processes: every
         drone of every environment in one network call per step."""
@@ -338,6 +411,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
                 if ei not in per:
                     continue
                 pk, (a_, l_, v_) = pks[ei], per[ei]
+                rs = rscale(ei, pk["fam"], float(np.mean(res["rew"])), res["metrics"] is not None)
                 for j, i in enumerate(pk["idx"]):
                     buf["obs"][t, ei, i] = pk["o"][j]
                     buf["cin"][t, ei, i] = pk["c"][j]
@@ -345,7 +419,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
                     buf["act"][t, ei, i] = a_[j]
                     buf["logp"][t, ei, i] = l_[j]
                     buf["val"][t, ei, i] = v_[j]
-                    buf["rew"][t, ei, i] = res["rew"][j] * cfg.reward_scale
+                    buf["rew"][t, ei, i] = res["rew"][j] * cfg.reward_scale * rs
                     buf["valid"][t, ei, i] = 1.0
                     if res["term"][j] or res["trunc"][j]:
                         buf["term"][t, ei, i] = 1.0
@@ -404,6 +478,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
                         act = act.cpu().numpy()
                     acts = {a: int(x) for a, x in zip(agents, act)}
                     nobs, rew, term, trunc, ninfos = env.step(acts)
+                    rs = rscale(ei, family_of(env), float(np.mean([rew[a] for a in agents])), not env.agents)
                     for j, (a, i) in enumerate(zip(agents, idx)):
                         buf["obs"][t, ei, i] = o[j]
                         buf["cin"][t, ei, i] = c[j]
@@ -411,7 +486,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
                         buf["act"][t, ei, i] = act[j]
                         buf["logp"][t, ei, i] = logp[j]
                         buf["val"][t, ei, i] = val[j]
-                        buf["rew"][t, ei, i] = rew[a] * cfg.reward_scale
+                        buf["rew"][t, ei, i] = rew[a] * cfg.reward_scale * rs
                         buf["valid"][t, ei, i] = 1.0
                         if term[a]:
                             buf["term"][t, ei, i] = 1.0
@@ -463,7 +538,7 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
         warm = update <= cfg.critic_warmup
         kl_coef = 0.0
         if anchor is not None:
-            kl_coef = cfg.bc_coef * max(0.0, 1.0 - (update - 1) / max(1, int(cfg.bc_anneal * n_updates)))
+            kl_coef = cfg.bc_coef * max(cfg.bc_floor, 1.0 - (update - 1) / max(1, int(cfg.bc_anneal * n_updates)))
         for _ in range(cfg.epochs):
             perm = torch.randperm(n, device=dev)
             for s in range(0, n, mb):
@@ -504,6 +579,8 @@ def train(cfg: Config, log_every: int = 1) -> ActorCritic:
             ep_metrics = []
         if update % 50 == 0 or update == n_updates:
             save(net, cfg, out / "model.pt")
+        if cfg.val_every and field and (update % cfg.val_every == 0 or update == n_updates):
+            validate(update)
         if update % cfg.ckpt_every == 0 or update == n_updates:
             env_rngs = venv.rng_states() if use_vec else [e.rng.bit_generator.state for e in envs]
             save_checkpoint(ck_path, net, opt, cfg, update, env_steps, time.time() - t0, rng, env_rngs)
@@ -527,10 +604,10 @@ def save_checkpoint(path: Path, net, opt, cfg: Config, update: int, env_steps: i
     os.replace(tmp, path)
 
 
-def save(net: ActorCritic, cfg: Config, path: Path):
+def save(net: ActorCritic, cfg: Config, path: Path, extra: dict | None = None):
     c = asdict(cfg)
     c["sampler"] = asdict(cfg.sampler)
-    torch.save({"state_dict": {k: v.cpu() for k, v in net.state_dict().items()}, "config": c}, path)
+    torch.save({"state_dict": {k: v.cpu() for k, v in net.state_dict().items()}, "config": c, **(extra or {})}, path)
 
 
 def load(path: str | Path) -> tuple[ActorCritic, dict]:
@@ -540,7 +617,7 @@ def load(path: str | Path) -> tuple[ActorCritic, dict]:
     guided = cfg.get("guide", "none") not in (None, "none")
     net = ActorCritic(cfg["sampler"]["grid_size"], cfg["algo"] == "mappo", cfg["hidden"], arch, tf_kwargs(cfg), guided,
                        cfg.get("team", False), cfg["sampler"].get("camera", False), cfg["sampler"].get("real", False),
-                       cfg["sampler"].get("field", False))
+                       cfg["sampler"].get("field", False), cfg.get("plan_feats", False))
     net.load_state_dict(ck["state_dict"])
     net.eval()
     return net, cfg
@@ -572,9 +649,12 @@ class LearnedPolicy:
         torch.manual_seed(seed)
 
     def reset(self, env):
-        pass
+        if getattr(self.net, "field", False):
+            env.plan_feats = self.net.plan
 
     def act(self, env, obs=None) -> dict:
+        if getattr(self.net, "field", False):
+            env.plan_feats = self.net.plan
         agents = list(env.agents)
         if not agents:
             return {}

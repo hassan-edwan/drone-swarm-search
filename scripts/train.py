@@ -54,6 +54,13 @@ def main():
     p.add_argument("--field", nargs="*", default=None, metavar="FAMILY",
                    help="M8 field environment on these families (default: wilderness urban; flood is held out)")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--gamma", type=float, default=0.99, help="discount (0.995-0.997 for long field missions)")
+    p.add_argument("--plan-feats", action="store_true", help="field: planning features in the observation")
+    p.add_argument("--bc-floor", type=float, default=0.0,
+                   help="the KL pull towards the anchor never falls below this share of --bc-coef")
+    p.add_argument("--reward-norm", action="store_true", help="scale rewards per scenario family")
+    p.add_argument("--val-every", type=int, default=0, help="updates between validation runs; keeps best.pt")
+    p.add_argument("--val-episodes", type=int, default=8, help="validation missions per family")
     p.add_argument("--workers", type=int, default=0, help="processes running the missions (0: in this process)")
     p.add_argument("--resume", action="store_true", help="continue from <out>/ckpt.pt (same command otherwise)")
     p.add_argument("--ckpt-every", type=int, default=25, help="updates between resumable checkpoints")
@@ -86,6 +93,12 @@ def main():
         out_dir=a.out or f"runs/{a.algo}",
         resume=a.resume,
         workers=a.workers,
+        gamma=a.gamma,
+        plan_feats=a.plan_feats,
+        bc_floor=a.bc_floor,
+        reward_norm=a.reward_norm,
+        val_every=a.val_every,
+        val_episodes=a.val_episodes,
         ckpt_every=a.ckpt_every,
         sampler=ScenarioSampler(grid_size=a.grid, obstacle_frac=(0.0, a.obstacles), camera=a.camera,
                                 real=a.real, max_steps=CAMERA_STEPS if a.camera else 200),

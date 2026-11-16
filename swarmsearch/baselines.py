@@ -22,24 +22,34 @@ def _altitude_step(alt: int, want: int) -> int | None:
     return CLIMB if want > alt else DESCEND
 
 
-def _toward(env, a, field, tiebreak=None, sprint: bool = False) -> int:
+def _toward(env, a, field, tiebreak=None, sprint: bool = False, eq: list | None = None) -> int:
     """Move that most reduces `field` (a distance field), ties by higher tiebreak.
     With sprint (field environment), cover two cells per step while the
-    target is still far (the camera is nearly blind at that speed)."""
+    target is still far (the camera is nearly blind at that speed). `eq`, if
+    given, receives every move as good as the chosen one by distance (the
+    tiebreak aside): imitation learns from that set, not from one of them."""
     mask = env.action_mask(a)
     nxt = env.pos[a] + MOVES
     best, best_key = HOVER, None
+    dists = {}
     for m in np.flatnonzero(mask[:9]):
         nx, ny = int(nxt[m, 0]), int(nxt[m, 1])
+        dists[int(m)] = field[ny, nx]
         key = (field[ny, nx], 0.0 if tiebreak is None else -tiebreak[ny, nx])
         if best_key is None or key < best_key:
             best, best_key = int(m), key
+    same = [m for m, d in dists.items() if d == best_key[0]] if best_key is not None else [best]
     if sprint and best < 8:
         x, y = (int(v) for v in env.pos[a])
         if field[y, x] > 4 and mask[11 + best]:
             nx, ny = x + 2 * MOVES[best][0], y + 2 * MOVES[best][1]
             if field[ny, nx] < field[y, x] - 1:
+                if eq is not None:
+                    eq.extend(11 + m for m in same if m < 8 and mask[11 + m]
+                              and field[y + 2 * MOVES[m][1], x + 2 * MOVES[m][0]] < field[y, x] - 1)
                 return 11 + best
+    if eq is not None:
+        eq.extend(same)
     return best
 
 
@@ -219,6 +229,7 @@ class BeliefGreedy:
         self.nb = neighbour_weight
 
     def reset(self, env: GridSearchEnv):
+        self.equivalent: dict[str, list[int]] = {}  # per drone: moves as good as the chosen one (imitation)
         self.targets: dict[str, tuple[tuple[int, int], float]] = {}
         self.cam_targets: dict[str, tuple[tuple[int, int], int, float]] = {}
         self.tasks: dict[str, tuple[int, int]] = {}
@@ -236,6 +247,7 @@ class BeliefGreedy:
             return {}
         if getattr(env, "grid_epoch", 0) != getattr(self, "_epoch", 0):
             self.reset(env)  # the search area grew: cells moved, plans start again
+        self.equivalent = {}
         if env.camera:
             return self._act_camera(env, live)
         g = env.grid_size
@@ -348,6 +360,9 @@ class BeliefGreedy:
                 continue
             (tx, ty), k, _ = self.cam_targets[a]
             m = _altitude_step(getattr(env, "alt_tgt", env.alt)[a], k)
+            eq: list = []
             out[a] = m if m is not None else _toward(env, a, self._field(env, (tx, ty)), V_of[a][k],
-                                                     sprint=getattr(env, "has_sprint", False))
+                                                     sprint=getattr(env, "has_sprint", False), eq=eq)
+            if eq:
+                self.equivalent[a] = eq
         return out

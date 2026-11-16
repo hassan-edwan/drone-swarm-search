@@ -58,6 +58,30 @@ COARSE = 5
 PATCH = 5
 FIELD_SCALARS = 50
 FIELD_OBS_DIM = N_PATCH * PATCH * PATCH + N_COARSE * COARSE * COARSE + FIELD_SCALARS
+# Optional parts of the observation (Phase 2):
+# - planning features: for each of 8 directions, the best expected detections per step
+#   of travel there (any height) and how far it is: what the rule ranks by.
+# - the full map at a fixed size for a CNN, whatever the grid (20, 32, 64 or 128 cells).
+PLAN_DIM = 16
+FIELD_MAP_RES = 32
+FIELD_MAP_CHANNELS = 6  # belief, freshness, blocked, alerts waiting, teammates, self
+FIELD_MAP_DIM = FIELD_MAP_CHANNELS * FIELD_MAP_RES * FIELD_MAP_RES
+
+
+def field_obs_dim(plan: bool = False, full_map: bool = False) -> int:
+    return FIELD_OBS_DIM + (PLAN_DIM if plan else 0) + (FIELD_MAP_DIM if full_map else 0)
+
+
+def to_res(a: np.ndarray, how: str = "mean", res: int = FIELD_MAP_RES) -> np.ndarray:
+    """A (g, g) layer at res x res: block mean/max when g is a multiple, else nearest cell."""
+    g = a.shape[0]
+    if g == res:
+        return a
+    if g > res and g % res == 0:
+        b = a.reshape(res, g // res, res, g // res)
+        return b.max(axis=(1, 3)) if how == "max" else b.mean(axis=(1, 3))
+    idx = (np.arange(res) * g / res).astype(int)
+    return a[np.ix_(idx, idx)]
 FIELD_STATE_DIM = 9 * POOL * POOL + 18
 CRASH_PENALTY = 10.0
 
@@ -96,6 +120,7 @@ class FieldEnv(GridSearchEnv):
         self.shield = shield
         self.camera = self.real = self.field = True
         self.full_map = self.guided = self.team = False
+        self.plan_feats = False  # Phase 2 options (field_obs_dim)
         self.guide_coef = 0.0
         self.reward = "find_time"
         self.goals = {}
@@ -106,9 +131,8 @@ class FieldEnv(GridSearchEnv):
         self._obs_dim = FIELD_OBS_DIM
         self._state_dim = FIELD_STATE_DIM
 
-    @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
-        return spaces.Box(-1.0, 5.0, shape=(FIELD_OBS_DIM,), dtype=np.float32)
+        return spaces.Box(-1.0, 5.0, shape=(field_obs_dim(self.plan_feats, self.full_map),), dtype=np.float32)
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
@@ -1238,8 +1262,41 @@ class FieldEnv(GridSearchEnv):
             self._energy_home(a), float(self.nofly[y, x]),
         ]
         parts.append(np.array(scal, dtype=np.float64))
+        if self.plan_feats:
+            parts.append(self._plan_features(x, y))
+        if full_map if full_map is not None else self.full_map:
+            own = np.zeros((g, g))
+            own[y, x] = 1.0
+            parts += [to_res(dens / 5.0).ravel(), to_res(fresh).ravel(), to_res(blocked).ravel(),
+                      to_res(np.clip(cand, 0, 1), "max").ravel(), to_res(mates, "max").ravel(),
+                      to_res(own, "max").ravel()]
         out = np.concatenate(parts).astype(np.float32)
-        assert out.shape[0] == FIELD_OBS_DIM, out.shape
+        return out
+
+    def _plan_features(self, x, y) -> np.ndarray:
+        """For each of 8 directions from the drone: the best expected detections
+        per step of travel (and height change) at any cell that way, relative
+        to the best anywhere, and how far that cell is. The rule picks its
+        target by the same score."""
+        key = (id(self._v), self.t, self.map_version, self.grid_size)
+        if getattr(self, "_fv_key", None) != key:
+            self._fv = np.stack([self.footprint_values(k) for k in range(3)])
+            self._fv_key = key
+        g = self.grid_size
+        yy, xx = np.mgrid[0:g, 0:g]
+        d = np.maximum(np.abs(xx - x), np.abs(yy - y))
+        score = (self._fv / (1.0 + d[None])).max(axis=0)
+        score[y, x] = 0.0
+        top = max(float(score.max()), 1e-12)
+        sector = ((np.arctan2(yy - y, xx - x) + np.pi) / (2 * np.pi) * 8).astype(int) % 8
+        out = np.zeros(PLAN_DIM)
+        for k in range(8):
+            m = sector == k
+            m[y, x] = False
+            if m.any():
+                i = int(np.argmax(np.where(m, score, -1.0)))
+                out[k] = score.flat[i] / top
+                out[8 + k] = d.flat[i] / g
         return out
 
     def state(self) -> np.ndarray:

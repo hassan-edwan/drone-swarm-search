@@ -187,9 +187,25 @@ def test_adaptive_map_learns_a_weak_sensor():  # M3
 def test_sampler_and_imitation_labels():
     from swarmsearch.imitation import _rollouts
     sampler = FieldSampler(families={"urban": 1.0})
-    O, M, A, ms = _rollouts((sampler, 1, 0, None, 1.0, False))
+    O, M, A, S, ms = _rollouts((sampler, 1, 0, None, 1.0, False, "mlp", False, 1))
     assert O.shape[1] == FIELD_OBS_DIM and M.shape[1] == N_ACTIONS_FIELD
     assert M[np.arange(len(A)), A].all()  # every label is a legal action
+    assert S[np.arange(len(A)), A].all() and (S <= M).all()  # the label is in its set; sets are legal
+
+
+def test_full_map_and_planning_features_for_every_family():
+    from swarmsearch.envs import make_env
+    from swarmsearch.field.env import field_obs_dim
+    from swarmsearch.mappo import ActorCritic
+    net = ActorCritic(64, True, arch="cnn", camera=True, real=True, field=True, plan=True)
+    for fam in ("urban", "flood", "wilderness"):
+        env = make_env(sampler=FieldSampler(families={fam: 1.0}), seed=0, full_map=True, plan_feats=True)
+        obs, infos = env.reset(seed=0)
+        o = np.stack([obs[a] for a in env.agents])
+        assert o.shape[1] == field_obs_dim(True, True) == net.vec + net.map_in
+        import torch
+        m = torch.from_numpy(np.stack([infos[a]["action_mask"] for a in env.agents]).astype(np.float32))
+        assert net.dist(torch.from_numpy(o), m).probs.shape == (len(env.agents), N_ACTIONS_FIELD)
 
 
 def test_m7_uses_a_head_count_estimate():  # P6 (leak fix)
