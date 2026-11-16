@@ -51,17 +51,21 @@ Sources are numbered [1]–[17] at the end. The **hard test cases** and the
 | K4 | The prior map is right | It is a planner's guess | Hint | True distance spread, behaviour mix and last-seen point all differ from the map's | done | `f/people.py` |
 | K5 | The terrain or building map is right | Disasters change ground; open data has gaps | Hint | Wilderness map misses 0–40% of trail stretches and has a noisy canopy map; urban collapses unknown until seen (aftershocks add more) | done | `f/terrain.py` |
 | K6 | The operator's movement profile is the truth | It is a guess | Hint | 30% of missions an operator names a behaviour: right 70% of the time, and it only shifts the map's hypothesis weights | done | `f/people.py` hypothesis_bank |
+| K7 | The map learns only from the drones | Searches feed on clues (packs, clothing, tracks), ground-team coverage and new reports | No | Moving people leave clues (0–0.5 per hour, assumed) along their way before and during the mission; drones (colour camera, half a person's visibility) and ground teams find them; a confirmed clue re-weights the map and the hypotheses by distance from it (person passed there at an unknown time). Ground teams' searched trails lower the base's map. In 0–30% of missions a new report (late ping, witness) narrows the area, or says the person is far away | done (rates: calibrate) | `f/evidence.py`, `f/env.py` _team_looks, _new_report |
 
 ## S. Sensing and finding
 
 | ID | Assumption | Evidence | Rely? | M8 model | Status | Code |
 |---|---|---|---|---|---|---|
-| S1 | We know the sensor's detection rate | Detection varies with terrain and visibility [8][9]; trials are small [10][11]; believed and true detection differ [14] | No | True detection is the modelled one ×0.4–1.1; false alarms ×0.5–3. Optional adaptive map estimates the real rate from finds against expectations (M3) | calibrate (nominal rates: sweep-width trials with your drone [8][9]) | `f/env.py` _search |
+| S1 | We know the sensor's detection rate | Detection varies with terrain and visibility [8][9]; trials are small [10][11]; believed and true detection differ [14]. No published drone curve of detection against height exists [25]. Checks of the nominal rates: colour detection 70 m → 40/120 m matches the fitted height effect in [23] (0.88/0.39 against 0.90/0.35); at 50 m, SAR reviewers found 66–72% of people and a detector 90% [24] | No | True detection is the modelled one ×0.4–1.1; false alarms ×0.5–3. Optional adaptive map estimates the real rate from finds against expectations (M3) | calibrate (nominal rates: sweep-width trials with your drone [8][9]) | `f/env.py` _search |
 | S2 | Each look is an independent chance | Single thermal frames under canopy show people as fragments that change with viewpoint; combining views works far better [11] | No | Per person and viewing direction (8 sides + straight down, per height) the person is hidden or not, drawn once (5% in the open to ~60% under dense canopy); moving to a new spot redraws it. The map counts looks per direction and updates with the same correlated model | done | `f/sensing.py`, `f/env.py` _search |
-| S3 | Canopy and thermal factors are fixed | 86–90% in dense forest needs special processing [10] | No | Continuous canopy density; dual camera (better of ordinary and thermal); thermal contrast from air temperature, weaker under midday sun and rain; ordinary camera needs light (clock-driven) | done (factors: calibrate) | `f/sensing.py` conditions |
+| S3 | Canopy and thermal factors are fixed | 86–90% in dense forest needs special processing [10]. Fitted canopy effects for colour and thermal [23]: colour under full canopy keeps 5.5% of its open-ground rate (model 6%); thermal 31% (model now 32%, was 18%: recalibrated 2026-11-16); single thermal frames under dense forest find about half the people [11] | No | Continuous canopy density; dual camera (better of ordinary and thermal); thermal contrast from air temperature, weaker under midday sun and rain; ordinary camera needs light (clock-driven) | done (factors: calibrate) | `f/sensing.py` conditions |
 | S4 | False alarms come at a known rate | Animals, hot rocks, debris; manual screening gives many false positives [15] | No | Rate per visible cell rises with canopy (animals), midday sun on open wilderness ground (hot rocks) and rubble | done (rates: calibrate) | `f/sensing.py` false_alarm_rate |
 | S5 | A detection is a find | A person reviews the video; screening is slow and error-prone [15][16]; the human side was the bottleneck in field trials [5] | No | Detections stream to 1–2 reviewers (8–40 s each) only while the drone is in radio contact (otherwise they wait onboard); misses rise with hours on task and backlog; high-altitude images are often not clear enough (closer look needed); 85% of false alarms dismissed; repeat sightings at the same spot are grouped; a find counts when confirmed | done (rates: calibrate) | `f/sensing.py` OperatorQueue, `f/env.py` _review |
 | S6 | Only buildings block the view | Ridges hide valleys | Yes | Line of sight over elevation plus buildings, drone at its height above the ground beneath it | done | `f/sensing.py` geo_table |
+| S7 | Detection is a probability | Real drones find people with a vision model on video, which has its own misses (small, partly hidden, unusual postures) and false hits [24][26] | No | Detection is a modelled probability per look (height, canopy, light, clothing, heat, motion). The image pipeline itself is not simulated (scripts/render_drone_view.py only illustrates it) | calibrate: fit height and occlusion curves for the detector you fly on NOMAD (10–90 m, 10 visibility levels) [26] and HIT-UAV thermal (60–130 m) [27]; canopy and day/night splits on WiSARD [28] | `f/sensing.py` |
+| S8 | False alarms come from nowhere in particular | Cameras flag other walkers, campers, animals and the searchers themselves; they cluster on trails and near the command post, where lost people are also likely | Yes | Besides the background rate (S4): other walkers (on trails, mostly by day, fewer at night), animals, and the ground teams move through the area and raise alerts when seen; an operator dismisses most animals and tracked searchers at once but often wants a closer look at a walker (rates assumed) | done (rates: calibrate) | `f/evidence.py` Others |
+| S9 | Cameras are the only sensors | Phone-signal detectors and loudspeaker-microphone payloads are flown on SAR drones; in collapses most survivors cannot be seen from the air | — | Not modelled: phone pings arrive only as reports (P2, K7) | open (Phase 2 option) | — |
 
 ## D. Drones and flight
 
@@ -75,6 +79,7 @@ Sources are numbered [1]–[17] at the end. The **hard test cases** and the
 | D6 | Drones are reliable | Link loss, weather, failures | No | Return on link loss after 30 s (half of missions); gust spells ground everyone; 2% launch failures; 0–3% per flight hour in-flight failures | done | `f/env.py` _update_modes |
 | D7 | The camera points straight down | Gimbals tilt forward | Yes | 30% of missions: forward-tilted camera looks a cell ahead at mid and high, slant ×0.85 | done (approximation) | `f/env.py` _search |
 | D8 | Anywhere can be flown | Ceilings, no-fly zones | Yes | 0–2 static no-fly zones and a pop-up zone (e.g. a helicopter) in 0–40% of missions for 10–20 min; drones caught inside are flown out | done | `f/env.py` |
+| D9 | Search runs on a grid with synchronous steps | Real drones fly continuous paths; decisions and messages are not simultaneous | Yes | Wilderness cells are sized per mission (50–200 m) and steps are the time to cross one at cruise speed; all drones decide and share at once. The policy's waypoints need a path follower and a flight controller (Phase 2, with learned flight control) | open (with flight control) | `f/params.py` |
 
 ## C. Communication
 
@@ -98,8 +103,9 @@ Sources are numbered [1]–[17] at the end. The **hard test cases** and the
 | ID | Assumption | Evidence | Rely? | M8 model | Status | Code |
 |---|---|---|---|---|---|---|
 | O1 | After a find, the drone carries on | Drones often stay over the person | Yes | 30–100% of finds: the nearest drone holds over the person until a ground team arrives (≤ 15 min) | done | `f/env.py` _dispatch |
-| O2 | There are no ground teams | Drones work with ground teams [5] | — | 1–3 teams walk from the base (1 m/s, Tobler on slopes) to confirmed finds; idle teams search trails and streets; a team at the person's cell rescues them | done (simple tactics) | `f/env.py` _teams_step |
+| O2 | There are no ground teams | Drones work with ground teams [5] | — | 1–3 teams walk from the base (1 m/s, Tobler on slopes) to confirmed finds; idle teams search trails and streets, and what they search lowers the base's map (K7); they also find clues; a team at the person's cell rescues them | done (simple tactics) | `f/env.py` _teams_step |
 | O3 | The goal is the mean time to find | What matters is a live rescue [3]; search theory maximises success over time [6][7] | — | Reported: mean find time, found by half time, found inside the area, rescued share and rescue time | done | `f/env.py` metrics |
+| O4 | Any number of drones can fly anywhere at once | Beyond-visual-line-of-sight flights need a waiver; pilots per drone are limited; teams drive to the scene and may move the launch point | — | Not modelled: one launch point at the base, no travel time, no pilot limit (team sizes 2–8 stand in for staffing) | open (field operations) | — |
 
 ## M. Method and evaluation
 
@@ -109,6 +115,7 @@ Sources are numbered [1]–[17] at the end. The **hard test cases** and the
 | M2 | The critic may see the truth | Fine: training only | Critic sees pooled true maps and hidden parameters; the policy never does | kept |
 | M3 | Baselines get the same information as the policy | Unfair comparisons otherwise | Rule and sweep plan on each drone's own map and radio group, within radio coverage; adaptive-map option for an adaptive rule | done |
 | M4 | One training seed per model | Seed-to-seed variance unknown | `--seed` supported; several seeds for headline results when compute allows | open (compute) |
+| M5 | Generated terrain is like real terrain | Real elevation, forest and trail patterns differ from generated noise | Training on generated wilderness; real sites (USGS 3DEP elevation, NLCD tree cover, OpenStreetMap trails via scripts/import_site.py) only for testing | open (Phase 2: train on many real sites) |
 
 ---
 
@@ -140,7 +147,15 @@ volunteers as subjects, never real emergencies):
   from different directions.
 - **Operator review** (S5): time from detection to confirmation, and how
   many planted subjects operators miss over a long session.
-- **False alarms** (S4): alerts per flight hour over your terrain.
+- **False alarms** (S4, S8): alerts per flight hour over your terrain, split
+  into background (rocks, shadows) and things that move (walkers, animals,
+  your own searchers), and how often operators dismiss each from the image.
+- **Detector curves** (S7): before field time, fit your detector's recall
+  against height and occlusion on public data (NOMAD for colour, HIT-UAV for
+  thermal, WiSARD for canopy and day/night [26][27][28]); then check a few
+  points in the field.
+- **Clues** (K7): plant items (pack, jacket) along volunteers' routes; record
+  how often drones and ground teams find them and how far from the person.
 - **Battery** (D1): flight time with your payload in your conditions; swap time.
 - **Radio** (C1): link range from the base across your terrain.
 - **GPS** (D4): position error near cliffs, in valleys and under trees.
@@ -181,3 +196,10 @@ who can take over at any time.
 20. A Pragmatic Approach to Applied Search Theory (2020), Table 1: ISRID hiker, mountain temperate. *Journal of Search & Rescue* 4(1): https://wasspu.org/wp-content/uploads/2021/09/A-Pragmatic-Approach-to-Applied-Search-Theory.pdf
 21. New Zealand SAR, Lost Person Behaviour course (ISRID dementia): https://www.nzsar.govt.nz/assets/Downloadable-Files/5.SAR-92-Lost-Person-Behaviour-v5.pdf
 22. Jacobs, M. (2016). Terrain Based Probability Models for SAR, Table 1: https://mra.org/wp-content/uploads/2016/05/TerrainProbabilityModelsReport.pdf
+23. Hambrecht, L. et al. (2019). Detecting 'poachers' with drones: factors influencing the probability of detection with TIR and RGB imaging in miombo woodlands, Tanzania. *Biological Conservation* 233: 109–117. Logistic fits per unit canopy: RGB −4.48, thermal −2.51; RGB 100 m vs 70 m −0.92
+24. Gotovac, S. et al. (2020). *Remote Sensing* 12: 3295 (people in HERIDAL drone images at 50 m: SAR members' recall 66% unaided and 72% with detector cues; detector recall 90%). Dataset: http://ipsar.fesb.unist.hr/HERIDAL%20database.html
+25. Koester, R. J., interview on drone sweep width (no published drone sweep-width study as of 2026); ground sweep width day about 64 m vs night about 22 m (correction 0.34)
+26. NOMAD: natural occluded multi-scale aerial dataset (2023), 100 actors at 10–90 m with 10 visibility levels, CC BY 4.0: https://github.com/ArtRuss/NOMAD
+27. HIT-UAV: high-altitude infrared thermal dataset (2023), 60–130 m, altitude and day/night per image. *Scientific Data*: https://github.com/suojiashun/HIT-UAV-Infrared-Thermal-Dataset
+28. Broyles, D. et al. (2022). WiSARD: a labeled visual and thermal image dataset for wilderness search and rescue. IROS 2022; canopy and light tags; thermal recall 0.96 vs visual 0.85 (YOLOv5): https://sites.google.com/uw.edu/wisard/
+29. Schedl, D. C., Kurmi, I. & Bimber, O. (2020). Search and rescue with airborne optical sectioning. *Nature Machine Intelligence* 2: 783–790; single thermal frame AP 24.8% under dense forest vs 92.2% integrated. Data: https://doi.org/10.5281/zenodo.3894774

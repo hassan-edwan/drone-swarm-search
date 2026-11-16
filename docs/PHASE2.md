@@ -26,7 +26,7 @@ seeds and a larger evaluation.
 | Missions in worker processes | `train.py --workers N` | One network call per step for all drones of all missions. 2.2× faster with 4 workers on 4 cores; scales with cores until the learner update dominates |
 | Resumable checkpoints | `--resume`, `--ckpt-every` | Model, optimizer, counters and random state; written atomically. A stopped job continues where it was |
 | Parallel evaluation | `evaluate.py --workers N` | Results identical to one process |
-| Mission suite | `evaluate.py --missions` | 26 missions, one effect each ([MISSIONS.md](MISSIONS.md)) |
+| Mission suite | `evaluate.py --missions` | 30 missions, one effect each ([MISSIONS.md](MISSIONS.md)) |
 | Growing search area | `--expand-share`, `--long-share` | The area doubles in width when the map says the person is more likely outside (K2) |
 | GPU learner | `--device cuda` | The network on the GPU, the missions on CPU workers |
 

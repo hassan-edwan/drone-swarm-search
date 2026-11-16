@@ -185,6 +185,11 @@ FIELD_MISSIONS = {
     "wild_long_fixed": _field("wilderness", mission_s=_LONG, expand=True, expand_at=9.0),
     "wild_long_expand": _field("wilderness", mission_s=_LONG, expand=True, expand_at=0.5),
     "wild_long_expand_2h": _field("wilderness", mission_s=_LONG, expand=True, expand_at=9.0, expand_min=120.0),
+    # Evidence from outside the drones, and others in the area (K7, S8)
+    "wild_no_evidence": _field("wilderness", clue_rate=0.0, p_report=0.0, n_walkers=0, n_animals=0),
+    "wild_clues": _field("wilderness", clue_rate=1.0),
+    "wild_late_report": _field("wilderness", p_report=1.0),
+    "wild_busy_trails": _field("wilderness", n_walkers=12, n_animals=10),
     # Urban collapse
     "urban_heavy_collapse": _field("urban", collapse_frac=0.6),
     "urban_aftershock": _field("urban", aftershock=1.0),

@@ -35,6 +35,7 @@ from ..env import (CLEAR_WEIGHT, FIND_TIME_REWARD, MAX_DRONES, MOVES, N_TEAMMATE
                    PENALTY_STEP, REWARD_DETECT, WEIGHT_FLOOR, GridSearchEnv, View)
 from ..obstacles import distance_fields
 from . import lpb
+from . import evidence as ev
 from . import people as pp
 from . import sensing as sn
 from .params import FAMILY, FieldSampler, FieldScenario
@@ -246,6 +247,14 @@ class FieldEnv(GridSearchEnv):
         self.n_alarms = self.n_false_alarms = self.n_bumps = self.n_slips = self.n_gps_off = 0
         self.n_near = self.n_crash = self.n_swaps = self.n_launch_fail = 0
         self.linked_steps = 0.0
+        # Evidence and others in the area (K7, S8), on their own random stream so that
+        # missions without them run exactly as before.
+        self._ev_rng = np.random.default_rng((sc.seed_world, 7))
+        self.clues = ev.Clues(w, sc, self.people, self._ev_rng)
+        self.others = ev.Others(w, sc, self._ev_rng)
+        self._report_t = (int(self._ev_rng.uniform(0.1, 0.8) * fam.max_steps)
+                          if self._ev_rng.random() < sc.p_report else -1)
+        self.n_clues_seen = self.n_clues_used = self.n_other_alarms = self.n_reports = 0
         self.expanded_t = -1  # step at which the search area grew (K2), -1: not yet
         self.grid_epoch = 0  # bumped when the grid changes (planners re-plan)
         self._update_conditions()
@@ -583,6 +592,8 @@ class FieldEnv(GridSearchEnv):
             rewards[a] += per_find * found_now
         # people, water, aftershocks
         self._move_people()
+        if self.t == self._report_t:
+            self._new_report()
         if self.t == self._aftershock_t:
             self._aftershock()
         self._spread_belief()
@@ -700,6 +711,8 @@ class FieldEnv(GridSearchEnv):
         for tm in self.teams:
             tm["pos"] = tm["pos"] + off
             tm["patrol"] = 0
+        self.clues.shift(ox, oy)
+        self.others.shift(ox, oy, big)
         self._patrol = self._patrol_route(big)
         self.link_mask = self._link_mask(sc, big)
         self._fields, self._fields_ver = {}, -1
@@ -908,6 +921,7 @@ class FieldEnv(GridSearchEnv):
                     self.queue.add(item)  # streamed to the operator while in contact
                 else:
                     v.outbox.append(item)
+        self._search_extras(a, k, Gt, tx, ty, ex, ey, motion * slant, v, reports)
         if hit:
             ys, xs = zip(*hit)
             m = np.zeros((g, g), dtype=bool)
@@ -946,6 +960,71 @@ class FieldEnv(GridSearchEnv):
             reward += REWARD_DETECT * detected * max(1, self.n_free)
         return reward
 
+    def _search_extras(self, a, k, Gt, tx, ty, ex, ey, factor, v, reports):
+        """Clues and others in the footprint (K7, S8): what the camera sees
+        besides the missing person and the background false-alarm rate."""
+        g, r, sc, rng = self.grid_size, sn.R, self.scenario, self._ev_rng
+        here: dict = {}
+        for p, kind in zip(self.others.pos, self.others.kind):
+            here.setdefault((int(p[0]), int(p[1])), []).append(kind)
+        for tm in self.teams:
+            here.setdefault(tuple(int(c) for c in tm["pos"]), []).append("searcher")
+        for oy, ox in zip(*np.nonzero(Gt)):
+            cx, cy = tx + ox - r, ty + oy - r
+            clues = self.clues.at(cx, cy) if self.clues.pos else []
+            kinds = here.get((cx, cy), [])
+            if not clues and not kinds:
+                continue
+            base = Gt[oy, ox] * factor * sc.sensor_scale * (1 - self.occ_true[cy, cx])
+            rx, ry = int(np.clip(cx + ex - tx, 0, g - 1)), int(np.clip(cy + ey - ty, 0, g - 1))
+            for j in clues:
+                if rng.random() < min(0.98, base * self.C_rgb[cy, cx] * ev.CLUE_VIS):
+                    self.clues.found[j] = True
+                    self.n_clues_seen += 1
+                    self._send(a, v, dict(cell=(rx, ry), alt=k, true=None, t=self.t, p=0.0, drone=a, clue=j))
+            for kind in kinds:
+                la_rgb, la_th, dismiss = ev.LOOKS[kind]
+                p = base * max(self.C_rgb[cy, cx] * la_rgb, self.C_th[cy, cx] * la_th)
+                if rng.random() < min(0.98, p):
+                    reports.add((rx, ry))
+                    if self._known_spot(v, rx, ry):
+                        continue
+                    self.n_alarms += 1
+                    self.n_false_alarms += 1
+                    self.n_other_alarms += 1
+                    self._send(a, v, dict(cell=(rx, ry), alt=k, true=None, t=self.t, p=0.0, drone=a,
+                                          other=kind, dismiss=dismiss))
+
+    def _send(self, a, v, item):
+        if "base" in self.group_of.get(a, []):
+            self.queue.add(item)
+        else:
+            v.outbox.append(item)
+
+    def _use_clue(self, v, cell):
+        """The person passed this cell at some unknown time (K7)."""
+        self.n_clues_used += 1
+        L = ev.clue_likelihood(self.grid_size, self.fam.cell_m, self.scenario.family, cell)
+        ev.reweight(self, v, L, ev.CLUE_FLOOR)
+
+    def _new_report(self):
+        """A late phone ping, a witness or a trail register (K7): a rough area
+        around where the person really is, or word that they are far away."""
+        ppl, fam, rng, g = self.people, self.fam, self._ev_rng, self.grid_size
+        todo = np.flatnonzero(~self.found)
+        if not len(todo):
+            return
+        i = int(todo[0])
+        self.n_reports += 1
+        if not ppl.outside[i]:
+            rad = rng.uniform(300, 1500) / fam.cell_m
+            c = ppl.pos[i] + rng.normal(0, rad / 2, 2)
+            yy, xx = np.mgrid[0:g, 0:g]
+            L = np.where(np.hypot(xx - c[0], yy - c[1]) <= rad, 4.0, 1.0)
+            ev.reweight(self, self.views["base"], L, 1.0)
+        elif np.isfinite(ppl.far[i, 0]):
+            ev.reweight(self, self.views["base"], np.ones((g, g)), 4.0)
+
     def _known_spot(self, v, x, y) -> bool:
         """A detection next to one already queued or found is the same sighting."""
         def near(c):
@@ -980,6 +1059,8 @@ class FieldEnv(GridSearchEnv):
                 self._apply_find(base_v, i, (x, y))
                 base_v.cand_t[y, x] = -1e9
                 self._dispatch(i)
+            elif verdict == "clue":
+                self._use_clue(base_v, (x, y))
             elif verdict == "closer_look":
                 base_v.cand_t[y, x] = self.t  # stays on the map for a low pass
             else:
@@ -1023,6 +1104,7 @@ class FieldEnv(GridSearchEnv):
                 if tuple(int(v) for v in tm["pos"]) == goal:
                     tm["patrol"] += 1
             x, y = (int(v) for v in tm["pos"])
+            walked = [(x, y)]
             key = ("team", goal)
             if key not in self._fields:
                 self._fields[key] = distance_fields(w.walk, [goal])[0]
@@ -1035,7 +1117,9 @@ class FieldEnv(GridSearchEnv):
                 dz = abs(w.elev[y, x] - w.elev[int(tm["pos"][1]), int(tm["pos"][0])]) / fam.cell_m
                 tm["prog"] -= 1.0 / max(0.2, float(pp.tobler(dz)))
                 tm["pos"] = np.array([x, y], float)
+                walked.append((x, y))
             tm["prog"] = min(tm["prog"], 1.0)
+            self._team_looks(walked)
             here = np.flatnonzero(~ppl.outside & (ppl.pos[:, 0] == x) & (ppl.pos[:, 1] == y))
             for i in here:
                 if not self.found[i] and self.rng.random() < TEAM_DETECT * (1 - 0.4 * w.canopy[y, x]) * (
@@ -1050,6 +1134,23 @@ class FieldEnv(GridSearchEnv):
                         tm["task"] = None
         return found_now
 
+    def _team_looks(self, cells):
+        """What a ground team learns on the cells it walks through (O2, K7):
+        clues it spots, and (by radio to the base) that nobody it could see is
+        there, which lowers the base's map like a drone's look does."""
+        base_v, w = self.views["base"], self.w
+        for x, y in dict.fromkeys(cells):
+            p = TEAM_DETECT * (1 - 0.4 * w.map_canopy[y, x])  # modelled, like the drones' map
+            base_v.B[:, y, x] *= (1 - p)
+            for j in self.clues.at(x, y):
+                if self._ev_rng.random() < ev.TEAM_CLUE:
+                    self.clues.found[j] = True
+                    self.n_clues_seen += 1
+                    self._use_clue(base_v, (x, y))
+        cur, self._v = self._v, base_v
+        self._mix()
+        self._v = cur
+
     def _move_people(self):
         ppl, fam = self.people, self.fam
         hear = max(1, int(round(pp.HEAR_M / fam.cell_m)))
@@ -1059,7 +1160,10 @@ class FieldEnv(GridSearchEnv):
                 d = np.abs(ppl.pos - self.true_pos[a]).max(axis=1)
                 near |= d <= hear
         hours = self.scenario.hours_lost + self.t * fam.step_s / 3600.0
+        before = ppl.pos.copy()
         ppl.step(hours, near, self.water, self.rain_on, hold=self.found)  # found people wait for the team
+        self.clues.drop(ppl, (ppl.pos != before).any(axis=1), fam.step_s / 3600.0)
+        self.others.step(fam, sn.light_level(self.hour()) < 0.1)
 
     def _aftershock(self):
         """E3: more buildings collapse; the drones' maps do not know."""
@@ -1182,6 +1286,10 @@ class FieldEnv(GridSearchEnv):
             "rescued_frac": float((self.rescued_t >= 0).mean()) if n else 1.0,
             "found_inside_frac": float(self.found[inside].mean()) if inside.any() else 1.0,
             "outside_frac": float(self.people.outside.mean()) if n else 0.0,
+            "clues_seen": self.n_clues_seen,
+            "clues_used": self.n_clues_used,
+            "other_alarms": self.n_other_alarms,
+            "reports": self.n_reports,
             "expanded_min": self.expanded_t * self.fam.step_s / 60.0 if self.expanded_t >= 0 else None,
             "coverage": float(self.visited[self.w.walk].mean()),
             "repeat_frac": self.n_repeats / max(1, self.n_visits),

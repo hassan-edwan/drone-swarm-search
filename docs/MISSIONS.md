@@ -64,6 +64,15 @@ disaster it has not seen.
 | `wild_short_battery` | 25-minute batteries, 5-minute swaps | D1 |
 | `wild_airspace` | three no-fly zones and a temporary closure | D8 |
 
+### Evidence and others in the area (K7, S8)
+
+| Mission | What changes | Tests |
+|---|---|---|
+| `wild_no_evidence` | no clues, reports, walkers or animals (as in Phase 1) | the reference |
+| `wild_clues` | one clue per hour of walking | using clues |
+| `wild_late_report` | a new report arrives during every mission | using new information |
+| `wild_busy_trails` | 12 walkers and 10 animals | look-alike false alarms |
+
 ### Long operations and a growing area (K2)
 
 Four-hour operations on a world built twice as wide. All three missions use

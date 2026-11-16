@@ -143,6 +143,11 @@ class FieldScenario:
     # Growing the search (K2): wilderness only. The world is built EXPAND times wider;
     # the drones start on the centre and the area grows once their map puts the
     # person more likely outside than inside (or at a set time).
+    # Evidence from outside the drones, and others in the area (K7, S8; field/evidence.py)
+    clue_rate: float = 0.0  # clues a moving person leaves per hour
+    p_report: float = 0.0  # chance of a new report (late ping, witness) during the mission
+    n_walkers: int = 0  # other walkers and campers
+    n_animals: int = 0  # deer, cattle, dogs: warm and person-sized to a detector
     expand: bool = False
     expand_at: float = 0.5  # the map's chance the person is outside the area that triggers growth
     expand_min: float = 0.0  # also grow at this mission minute (an operational-period boundary; 0: off)
@@ -238,4 +243,11 @@ def sample_scenario(rng: np.random.Generator, family: str, **override) -> FieldS
     # Drawn last so the draws above (and so every earlier scenario) are unchanged: these two
     # were lost to a comment until 2026-11-15 and every mission used the defaults.
     sc = replace(sc, phone_ping=bool(rng.random() < 0.1), map_error=float(u(0.0, 0.4)))
+    # Added 2026-11-16, also drawn last (K7, S8). Rates assumed: clues are found in many but not all
+    # searches; other walkers mostly by day.
+    n_walk = {"wilderness": (0, 6), "urban": (0, 12), "flood": (0, 6)}[family]
+    n_anim = {"wilderness": (0, 8), "urban": (0, 3), "flood": (0, 3)}[family]
+    sc = replace(sc, clue_rate=float(u(0.0, 0.5)), p_report=float(u(0.0, 0.3)),
+                 n_walkers=int(rng.integers(n_walk[0], n_walk[1] + 1) * (0.3 if light == "night" else 1.0)),
+                 n_animals=int(rng.integers(n_anim[0], n_anim[1] + 1)))
     return replace(sc, **override) if override else sc

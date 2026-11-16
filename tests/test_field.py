@@ -301,3 +301,54 @@ def test_people_outside_come_back_when_the_area_grows():
                 assert env.w.walk[y, x]
             return
     raise AssertionError("no seed had someone outside who the grown area covers")
+
+
+def _evidence_env(seed=1, **kw):
+    from dataclasses import replace
+    from swarmsearch.evaluate import FIELD_CONDITIONS
+    sc = replace(FIELD_CONDITIONS["wild_mix"](seed), **kw)
+    env = FieldEnv()
+    env.reset(seed=seed, options={"scenario": sc})
+    return env
+
+
+def test_clue_moves_probability_towards_it_and_keeps_mass():
+    env = _evidence_env()
+    v = env.views["base"]
+    mass0 = (v.B.sum(axis=(1, 2)) + v.out).copy()
+    g = env.grid_size
+    cell = (g // 4, g // 4)
+    near0 = env.belief[cell[1], cell[0]]
+    env._use_clue(v, cell)
+    np.testing.assert_allclose(v.B.sum(axis=(1, 2)) + v.out, mass0, rtol=1e-9)
+    env._v = v
+    assert env.belief[cell[1], cell[0]] > near0
+
+
+def test_ground_team_clears_the_cells_it_walks():
+    env = _evidence_env()
+    v = env.views["base"]
+    x, y = (int(c) for c in env.teams[0]["pos"])
+    b0 = v.B[:, y, x].copy()
+    env._team_looks([(x, y)])
+    assert (v.B[:, y, x] < b0 + 1e-15).all() and (v.B[:, y, x] < b0).any()
+
+
+def test_others_raise_alerts_the_operator_can_dismiss():
+    env = _evidence_env(3, n_walkers=6, n_animals=8)
+    pol = BeliefGreedy()
+    pol.reset(env)
+    while env.agents:
+        env.step(pol.act(env))
+    assert env.metrics()["other_alarms"] > 0
+
+
+def test_without_evidence_settings_nothing_new_happens():
+    env = _evidence_env(2, clue_rate=0.0, p_report=0.0, n_walkers=0, n_animals=0)
+    pol = BeliefGreedy()
+    pol.reset(env)
+    while env.agents:
+        env.step(pol.act(env))
+    m = env.metrics()
+    assert len(env.clues.pos) == 0 and m["clues_seen"] == 0 and m["reports"] == 0
+    assert m["other_alarms"] <= sum(1 for _ in env.teams) * 1000  # only the team's own searchers can appear

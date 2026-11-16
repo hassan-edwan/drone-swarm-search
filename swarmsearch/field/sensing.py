@@ -96,7 +96,8 @@ def conditions(canopy, rubble, smoke, water, hour: float, air_c: float, rain: bo
     """(ordinary camera, thermal) detection factors per cell."""
     rgb = light_level(hour) * (1 - 0.85 * canopy) * np.where(rubble, 0.6, 1.0) * (1 - smoke)
     rgb = rgb * np.where(water, 0.7, 1.0) * (0.7 if rain else 1.0)
-    th = thermal_contrast(air_c, hour, rain) * (1 - 0.55 * canopy) * np.where(rubble, 0.8, 1.0) * (1 - 0.3 * smoke)
+    # thermal under canopy fitted to Hambrecht et al. 2019 (register source 23)
+    th = thermal_contrast(air_c, hour, rain) * (1 - 0.25 * canopy) * np.where(rubble, 0.8, 1.0) * (1 - 0.3 * smoke)
     return rgb, th
 
 
@@ -116,6 +117,9 @@ def false_alarm_rate(family: str, canopy, rubble, hour: float, base: float) -> n
     sun = 1.0 if 10 <= hour % 24 < 17 else 0.2
     rate = base * (1.0 + 2.0 * canopy + 1.5 * sun * (1 - canopy) * (family == "wilderness") + 2.0 * rubble)
     return rate
+
+
+CLUE_CONFIRM = 0.8  # an operator accepts a real clue (assumed; see evidence.py)
 
 
 class OperatorQueue:
@@ -162,6 +166,9 @@ class OperatorQueue:
                     out.append((item, "confirm"))
                 else:
                     out.append((item, "closer_look"))
-            else:
-                out.append((item, "dismiss" if self.rng.random() < FA_DISMISS else "closer_look"))
+            elif item.get("clue") is not None:  # K7: a clue, judged from the image
+                out.append((item, "clue" if self.rng.random() < CLUE_CONFIRM else "dismiss"))
+            else:  # S8: walkers look like the subject; tracked searchers and animals are easy to dismiss
+                dismiss = item.get("dismiss", FA_DISMISS)
+                out.append((item, "dismiss" if self.rng.random() < dismiss else "closer_look"))
         return out
