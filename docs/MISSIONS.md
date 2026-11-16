@@ -68,7 +68,9 @@ disaster it has not seen.
 
 | Mission | What changes | Tests |
 |---|---|---|
-| `wild_no_evidence` | no clues, reports, walkers or animals (as in Phase 1) | the reference |
+| `wild_no_evidence` | no clues, reports, ground search, walkers or animals | the plainest case |
+| `wild_drones_only` | no clues, reports or ground search (others in the area as usual) | the drones on their own: the common case |
+| `wild_ground_search` | ground teams search trails | working with ground teams |
 | `wild_clues` | one clue per hour of walking | using clues |
 | `wild_late_report` | a new report arrives during every mission | using new information |
 | `wild_busy_trails` | 12 walkers and 10 animals | look-alike false alarms |

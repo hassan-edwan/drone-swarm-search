@@ -186,7 +186,10 @@ FIELD_MISSIONS = {
     "wild_long_expand": _field("wilderness", mission_s=_LONG, expand=True, expand_at=0.5),
     "wild_long_expand_2h": _field("wilderness", mission_s=_LONG, expand=True, expand_at=9.0, expand_min=120.0),
     # Evidence from outside the drones, and others in the area (K7, S8)
-    "wild_no_evidence": _field("wilderness", clue_rate=0.0, p_report=0.0, n_walkers=0, n_animals=0),
+    "wild_no_evidence": _field("wilderness", clue_rate=0.0, p_report=0.0, n_walkers=0, n_animals=0,
+                               ground_search=False),
+    "wild_drones_only": _field("wilderness", clue_rate=0.0, p_report=0.0, ground_search=False),
+    "wild_ground_search": _field("wilderness", ground_search=True),
     "wild_clues": _field("wilderness", clue_rate=1.0),
     "wild_late_report": _field("wilderness", p_report=1.0),
     "wild_busy_trails": _field("wilderness", n_walkers=12, n_animals=10),

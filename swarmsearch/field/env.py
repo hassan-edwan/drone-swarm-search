@@ -967,8 +967,10 @@ class FieldEnv(GridSearchEnv):
         here: dict = {}
         for p, kind in zip(self.others.pos, self.others.kind):
             here.setdefault((int(p[0]), int(p[1])), []).append(kind)
-        for tm in self.teams:
-            here.setdefault(tuple(int(c) for c in tm["pos"]), []).append("searcher")
+        for tm in self.teams:  # the command post itself is masked out
+            c = tuple(int(c) for c in tm["pos"])
+            if c != tuple(self.w.base):
+                here.setdefault(c, []).append("searcher")
         for oy, ox in zip(*np.nonzero(Gt)):
             cx, cy = tx + ox - r, ty + oy - r
             clues = self.clues.at(cx, cy) if self.clues.pos else []
@@ -1098,6 +1100,8 @@ class FieldEnv(GridSearchEnv):
                     tm["task"] = None
                     continue
                 goal = tuple(int(v) for v in ppl.pos[i])
+            elif not self.scenario.ground_search:
+                continue  # responders only: they wait at the base until a find
             else:
                 route = self._patrol
                 goal = route[tm["patrol"] % len(route)]

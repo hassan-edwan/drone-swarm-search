@@ -146,6 +146,7 @@ class FieldScenario:
     # Evidence from outside the drones, and others in the area (K7, S8; field/evidence.py)
     clue_rate: float = 0.0  # clues a moving person leaves per hour
     p_report: float = 0.0  # chance of a new report (late ping, witness) during the mission
+    ground_search: bool = True  # ground teams search; if not, they wait at the base and only go to finds
     n_walkers: int = 0  # other walkers and campers
     n_animals: int = 0  # deer, cattle, dogs: warm and person-sized to a detector
     expand: bool = False
@@ -247,7 +248,11 @@ def sample_scenario(rng: np.random.Generator, family: str, **override) -> FieldS
     # searches; other walkers mostly by day.
     n_walk = {"wilderness": (0, 6), "urban": (0, 12), "flood": (0, 6)}[family]
     n_anim = {"wilderness": (0, 8), "urban": (0, 3), "flood": (0, 3)}[family]
-    sc = replace(sc, clue_rate=float(u(0.0, 0.5)), p_report=float(u(0.0, 0.3)),
+    # Often there is no ground search, the person leaves nothing to find, and nothing new is reported
+    # (shares assumed): ground search in half the missions, clues in 40%, a new report possible in 40%.
+    sc = replace(sc, ground_search=bool(rng.random() < 0.5),
+                 clue_rate=float(u(0.05, 0.5)) if rng.random() < 0.4 else 0.0,
+                 p_report=float(u(0.0, 0.2)) if rng.random() < 0.4 else 0.0,
                  n_walkers=int(rng.integers(n_walk[0], n_walk[1] + 1) * (0.3 if light == "night" else 1.0)),
                  n_animals=int(rng.integers(n_anim[0], n_anim[1] + 1)))
     return replace(sc, **override) if override else sc
