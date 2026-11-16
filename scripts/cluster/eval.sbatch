@@ -8,7 +8,7 @@
 # the mission suite (docs/MISSIONS.md), EVAL_EPISODES missions each.
 source "$(dirname "$0")/common.sh" 2>/dev/null || source "$SLURM_SUBMIT_DIR/common.sh"
 MODELS="$RUN/bc.pt"
-for s in $SEEDS; do MODELS="$MODELS $RUN/rl_seed$s/model.pt"; done
+for s in $SEEDS; do MODELS="$MODELS $RUN/rl_seed$s/best.pt"; done   # best on validation
 for SUITE in field missions; do
   python scripts/evaluate.py --$SUITE --episodes $EVAL_EPISODES --models $MODELS --temps 1 0 \
     --workers "$CPUS" --out "$RUN/results" --tag $SUITE | tail -3
