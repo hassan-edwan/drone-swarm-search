@@ -9,7 +9,7 @@ for s in $SEEDS; do
   python scripts/train.py --field $FAMILIES --expand-share $EXPAND_SHARE --long-share $LONG_SHARE \
     --init "$RUN/bc_sharp.pt" --bc-anchor "$RUN/bc_sharp.pt" --bc-coef $BC_COEF --bc-anneal $BC_ANNEAL \
     --critic-warmup 30 --ent-coef $ENT_COEF --steps $RL_STEPS --envs $N_ENVS \
-    --arch $ARCH $PLAN --gamma $GAMMA --bc-floor $BC_FLOOR $REWARD_NORM \
+    --arch "$POLICY_ARCH" $PLAN --gamma $GAMMA --bc-floor $BC_FLOOR $REWARD_NORM \
     --val-every $VAL_EVERY --val-episodes $VAL_EPISODES \
     --workers $((CPUS > 8 ? CPUS - 4 : CPUS)) --threads 4 --device "${DEVICE:-cpu}" \
     --seed "$s" --ckpt-every $CKPT_EVERY --resume --out "$OUT" >> "$OUT.log" 2>&1
