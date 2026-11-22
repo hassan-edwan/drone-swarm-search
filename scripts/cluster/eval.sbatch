@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=swarm-eval
-#SBATCH --cpus-per-task=64
-#SBATCH --time=12:00:00
+#SBATCH --cpus-per-task=128
+#SBATCH --time=16:00:00
 #SBATCH --output=logs/%x-%j.out
 # Baselines, the copy and every seed's RL model on the core conditions and on
 # the mission suite (docs/MISSIONS.md), EVAL_EPISODES missions each.

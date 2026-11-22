@@ -53,14 +53,15 @@ If it passes, submit the full run:
 
 `submit.sh` submits three jobs, each waiting for the one before:
 
-| Job | Resources (edit the `#SBATCH` lines) | Rough cost |
+| Job | Resources (edit the `#SBATCH` lines) | Measured estimate |
 |---|---|---|
-| imitate | 32 CPUs, 12 h limit | 100–400 SUs |
-| train | an array with one task per seed; 64 CPUs, 24 h each | 2,000–3,000 SUs for three seeds |
-| evaluate | 64 CPUs, 12 h limit | 250–500 SUs |
+| imitate | 32 CPUs, 12 h limit | 3–5 h, 100–160 SUs |
+| train | an array with one task per seed; 64 CPUs, 24 h each | about 12 h and 800 SUs per seed |
+| evaluate | 128 CPUs (one node), 16 h limit | about 5 h, 600 SUs |
 
-The costs assume about 75 steps per second per core, as measured here;
-replace them using the smoke job's speed. Zaratan gives each core 4 GB, and asking
+The estimates use the smoke job's speed on Zaratan: 509 steps per second on
+16 cores, about 32 per core. The whole run is about 3,100 SUs and a day of
+wall time. Zaratan gives each core 4 GB, and asking
 for more memory is charged as extra cores, so the jobs ask for no memory
 and take the default (128 GB for imitation). Slurm output goes to `logs/`,
 results to `runs/phase2/`. Check progress with `squeue --me`, and the
