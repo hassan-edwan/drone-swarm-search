@@ -2,6 +2,7 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/phase2.env"
 cd "$SWARM_DIR"
+if command -v module >/dev/null 2>&1; then set +u; module load "$PY_MODULE"; set -u; fi
 [ -f "$VENV/bin/activate" ] && source "$VENV/bin/activate"
 mkdir -p "$RUN"
 export OMP_NUM_THREADS=1

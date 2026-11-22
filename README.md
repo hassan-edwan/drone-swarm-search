@@ -128,7 +128,7 @@ the true reward and can override the guide.
 ## Running on an HPC cluster (Slurm, e.g. Zaratan)
 
 Phase 2 (field environment at scale): see [docs/PHASE2.md](docs/PHASE2.md) and
-`scripts/cluster/` (`setup.sh`, then `submit.sh --account=...`).
+`scripts/cluster/` (`setup.sh`, then `sbatch -A <account> scripts/cluster/smoke.sbatch`, then `submit.sh -A <account>`).
 
 Earlier milestones: see the header of `scripts/hpc/train.sbatch` for one-time setup, then:
 

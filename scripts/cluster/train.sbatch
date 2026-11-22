@@ -1,9 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=swarm-train
 #SBATCH --cpus-per-task=64
-#SBATCH --mem=64G
 #SBATCH --time=24:00:00
-#SBATCH --output=%x-%A_%a.out
+#SBATCH --output=logs/%x-%A_%a.out
 #SBATCH --array=0-2
 #SBATCH --requeue
 #SBATCH --signal=B:USR1@300
@@ -11,7 +10,7 @@
 # when the time limit or a preemption nears, the job requeues itself and
 # continues from the checkpoint (--resume). Add --gres=gpu:1 and DEVICE=cuda
 # to put the network on a GPU (the missions stay on the CPUs).
-source "$(dirname "$0")/common.sh" 2>/dev/null || source "$SLURM_SUBMIT_DIR/common.sh"
+source "$(dirname "$0")/common.sh" 2>/dev/null || source "$SLURM_SUBMIT_DIR/scripts/cluster/common.sh"
 SEEDS_ARR=($SEEDS)
 SEED=${SEEDS_ARR[${SLURM_ARRAY_TASK_ID:-0}]}
 OUT="$RUN/rl_seed$SEED"

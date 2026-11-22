@@ -30,24 +30,47 @@ seeds and a larger evaluation.
 | Growing search area | `--expand-share`, `--long-share` | The area doubles in width when the map says the person is more likely outside (K2) |
 | GPU learner | `--device cuda` | The network on the GPU, the missions on CPU workers |
 
-## On a SLURM cluster
+## On UMD Zaratan (or another SLURM cluster)
 
-    git clone <repo> ~/drone-swarm-search
-    bash scripts/cluster/setup.sh                       # venv, requirements, tests
-    bash scripts/cluster/submit.sh --account=<acct> --partition=<cpu>
+Jobs should run from scratch, not home. Once, on a login node:
+
+    cd ~/scratch
+    git clone https://github.com/hassan-edwan/drone-swarm-search.git
+    cd drone-swarm-search
+    bash scripts/cluster/setup.sh                      # module load python, venv, PyTorch (CPU), requirements
+    sbalance                                           # your account name and remaining SUs
+
+Then a 1.5-hour smoke job on 16 cores (about 24 SUs): the tests, the whole
+pipeline at tiny settings, and the training speed:
+
+    sbatch -A <account> scripts/cluster/smoke.sbatch
+    squeue --me
+    tail logs/swarm-smoke-<jobid>.out                   # ends with "speed on 16 cores: N steps/s"
+
+If it passes, submit the full run:
+
+    bash scripts/cluster/submit.sh -A <account>
 
 `submit.sh` submits three jobs, each waiting for the one before:
 
-| Job | Resources (edit the `#SBATCH` lines) |
-|---|---|
-| imitate | 32 CPUs, 128 GB, 12 h |
-| train | an array with one task per seed; 64 CPUs, 64 GB, 24 h each |
-| evaluate | 64 CPUs, 12 h |
+| Job | Resources (edit the `#SBATCH` lines) | Rough cost |
+|---|---|---|
+| imitate | 32 CPUs, 12 h limit | 100–400 SUs |
+| train | an array with one task per seed; 64 CPUs, 24 h each | 2,000–3,000 SUs for three seeds |
+| evaluate | 64 CPUs, 12 h limit | 250–500 SUs |
+
+The costs assume about 75 steps per second per core, as measured here;
+replace them using the smoke job's speed. Zaratan gives each core 4 GB, and asking
+for more memory is charged as extra cores, so the jobs ask for no memory
+and take the default (128 GB for imitation). Slurm output goes to `logs/`,
+results to `runs/phase2/`. Check progress with `squeue --me`, and the
+training curves in `runs/phase2/rl_seed*/train_log.csv` and `val_log.csv`.
+For SU usage afterwards: `sacct -j <jobid> -o JobID,Elapsed,State,AllocTRES%32`.
 
 Training jobs requeue themselves five minutes before their time limit or a
 preemption, and continue from the checkpoint. All settings are in
 `scripts/cluster/phase2.env`, and any of them can be overridden from the
-environment.
+environment (for example `SEEDS="0 1" bash scripts/cluster/submit.sh -A <account>`).
 
 ## On one large machine
 
