@@ -45,11 +45,13 @@ def main():
                    help="M8 field environment on these families (default: wilderness urban)")
     p.add_argument("--arch", choices=["mlp", "cnn"], default="mlp", help="field: cnn reads the whole map")
     p.add_argument("--plan-feats", action="store_true", help="field: planning features in the observation")
+    p.add_argument("--plan-path", action="store_true", help="field: planning features from travel distance (the rule's score)")
     p.add_argument("--every", type=int, default=1, help="keep every n-th step (full-map samples are about 12 KB)")
     p.add_argument("--hard-labels", action="store_true",
                    help="learn the rule's one action instead of any of its equally good ones")
     p.add_argument("--out", default="models/bc_greedy.pt")
     a = p.parse_args()
+    a.plan_feats = 2 if a.plan_path else int(a.plan_feats)
 
     torch.manual_seed(a.seed)
     a.camera = a.camera or a.real

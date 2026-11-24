@@ -207,7 +207,7 @@ class Config:
     ckpt_every: int = 25  # updates between resumable checkpoints (model, optimizer, counters, RNG)
     resume: bool = False  # continue from out_dir/ckpt.pt if it exists
     workers: int = 0  # processes running the environments (0: in this process, the original loop)
-    plan_feats: bool = False  # field: planning features in the observation (what the rule ranks by)
+    plan_feats: int = 0  # field: planning features (1: straight-line distance, 2: the rule's score, travel distance)
     bc_floor: float = 0.0  # the KL pull towards the anchor never falls below this weight
     reward_norm: bool = False  # scale rewards per scenario family by a running return spread
     val_every: int = 0  # updates between validation runs (0: none); the best model is kept as best.pt

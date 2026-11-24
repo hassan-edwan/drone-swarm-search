@@ -288,6 +288,32 @@ class BeliefGreedy:
             out[a] = best
         return out
 
+    def rule_scores(self, env, a, V, group):
+        """(N_ALT, g, g) target scores for drone a: expected detections over the
+        footprint per step of travel and height change, -1 where the drone may
+        not pick (blocked, out of radio coverage, near a teammate's target, or
+        the spot it just searched). Also returns the excluded mask and the
+        travel distances from the drone."""
+        taken = ~env.free.copy()
+        if getattr(env, "link_mask", None) is not None:
+            taken |= ~env.link_mask  # field: plan within radio coverage
+        for b in group:
+            if b in self.cam_targets and b != a:
+                (tx, ty), k, _ = self.cam_targets[b]
+                rr = self.r + getattr(env, "foot_r", cam.FOOT_R)[k]
+                taken[max(0, ty - rr):ty + rr + 1, max(0, tx - rr):tx + rr + 1] = True
+        x, y = (int(v) for v in env.pos[a])
+        D = self._field(env, (x, y))
+        S = np.stack([np.where(taken, -1.0, V[k] / (1.0 + D + abs(k - env.alt[a]))) for k in range(cam.N_ALT)])
+        S[env.alt[a], y, x] = -1.0  # just searched it from here
+        S[~np.isfinite(S)] = -1.0
+        return S, taken, D
+
+    def choose(self, env, a, S, V, taken, D):
+        """The rule: the best score (lowest height first on ties)."""
+        k, ty, tx = np.unravel_index(int(np.argmax(S)), S.shape)
+        return int(k), int(ty), int(tx)
+
     def _act_camera(self, env, live) -> dict:
         """Camera mode: check candidates within CONFIRM_RANGE first (nearest,
         one drone each). Otherwise pick an (altitude, cell) pair by expected
@@ -335,25 +361,8 @@ class BeliefGreedy:
         if need:
             for a in need:
                 V = V_of[a]
-                taken = ~env.free.copy()
-                if getattr(env, "link_mask", None) is not None:
-                    taken |= ~env.link_mask  # field: plan within radio coverage
-                for b in same[a]:
-                    if b in self.cam_targets:
-                        (tx, ty), k, _ = self.cam_targets[b]
-                        rr = self.r + getattr(env, "foot_r", cam.FOOT_R)[k]
-                        taken[max(0, ty - rr):ty + rr + 1, max(0, tx - rr):tx + rr + 1] = True
-                x, y = (int(v) for v in env.pos[a])
-                D = self._field(env, (x, y))
-                best = None
-                for k in range(cam.N_ALT):
-                    score = np.where(taken, -1.0, V[k] / (1.0 + D + abs(k - env.alt[a])))
-                    if k == env.alt[a]:
-                        score[y, x] = -1.0  # just searched it from here
-                    ty, tx = np.unravel_index(int(np.argmax(score)), score.shape)
-                    if best is None or score[ty, tx] > best[0]:
-                        best = (score[ty, tx], (int(tx), int(ty)), k)
-                _, (tx, ty), k = best
+                S, taken, D = self.rule_scores(env, a, V, same[a])
+                k, ty, tx = self.choose(env, a, S, V, taken, D)
                 self.cam_targets[a] = ((tx, ty), k, float(V[k][ty, tx]))
         for a in live:
             if a in out:

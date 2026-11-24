@@ -14,7 +14,7 @@ def make_env(scenario=None, sampler=None, **kw):
         from .field.env import FieldEnv
         env = FieldEnv(scenario=scenario, sampler=sampler, seed=kw.get("seed"))
         env.full_map = bool(kw.get("full_map", False))
-        env.plan_feats = bool(kw.get("plan_feats", False))
+        env.plan_feats = int(kw.get("plan_feats", 0))
         return env
     from .env import GridSearchEnv
     kw.pop("plan_feats", None)

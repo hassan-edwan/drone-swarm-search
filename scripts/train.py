@@ -56,6 +56,7 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--gamma", type=float, default=0.99, help="discount (0.995-0.997 for long field missions)")
     p.add_argument("--plan-feats", action="store_true", help="field: planning features in the observation")
+    p.add_argument("--plan-path", action="store_true", help="field: planning features from travel distance (the rule's score)")
     p.add_argument("--bc-floor", type=float, default=0.0,
                    help="the KL pull towards the anchor never falls below this share of --bc-coef")
     p.add_argument("--reward-norm", action="store_true", help="scale rewards per scenario family")
@@ -67,6 +68,7 @@ def main():
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--out", default=None)
     a = p.parse_args()
+    a.plan_feats = 2 if a.plan_path else int(a.plan_feats)
 
     torch.set_num_threads(a.threads)
     a.camera = a.camera or a.real

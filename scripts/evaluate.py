@@ -40,12 +40,26 @@ def main():
     p.add_argument("--tag", default="", help="suffix for the results files")
     p.add_argument("--out", default="results")
     p.add_argument("--guide", default=None, help="override the guide a model was trained with")
+    p.add_argument("--planner", nargs="*", type=int, default=None,
+                   help="add the rollout planner; optional horizons in steps (default 60)")
     a = p.parse_args()
 
     policies = {} if a.no_baselines else {"lawnmower": Lawnmower(), "belief_greedy": BeliefGreedy()}
     if a.random:
         policies["random"] = RandomWalk(seed=0)
+    if a.planner is not None:
+        from swarmsearch.planner import PlannerPolicy
+        for h in a.planner or [60]:
+            policies["planner" + ("" if h == 60 else f"_h{h}")] = PlannerPolicy(horizon=h)
+    from swarmsearch import targets as tg
     for path in a.models:
+        stems = [Path(m).stem for m in a.models]
+        if tg.is_targets(path):  # the target-choosing policy (rule + learned correction)
+            tnet, _ = tg.load(path)
+            name = Path(path).stem if stems.count(Path(path).stem) == 1 else f"{Path(path).parent.name}_{Path(path).stem}"
+            for t in a.temps:
+                policies[name + ("" if t == 1.0 else f"_T{t:g}")] = tg.TargetPolicy(tnet, temperature=t)
+            continue
         net, cfg = load(path)
         arch = cfg.get("arch") or ("cnn" if cfg.get("full_map") else "mlp")
         stems = [Path(m).stem for m in a.models]

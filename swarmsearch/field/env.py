@@ -1263,7 +1263,7 @@ class FieldEnv(GridSearchEnv):
         ]
         parts.append(np.array(scal, dtype=np.float64))
         if self.plan_feats:
-            parts.append(self._plan_features(x, y))
+            parts.append(self._plan_features(x, y, a))
         if full_map if full_map is not None else self.full_map:
             own = np.zeros((g, g))
             own[y, x] = 1.0
@@ -1273,19 +1273,36 @@ class FieldEnv(GridSearchEnv):
         out = np.concatenate(parts).astype(np.float32)
         return out
 
-    def _plan_features(self, x, y) -> np.ndarray:
+    def _plan_features(self, x, y, a=None) -> np.ndarray:
         """For each of 8 directions from the drone: the best expected detections
         per step of travel (and height change) at any cell that way, relative
-        to the best anywhere, and how far that cell is. The rule picks its
-        target by the same score."""
+        to the best anywhere, and how far that cell is.
+
+        plan_feats 1: straight-line distance. plan_feats 2: the rule's own score,
+        travel distance around obstacles plus the height change, with blocked
+        cells and cells out of radio coverage left out."""
         key = (id(self._v), self.t, self.map_version, self.grid_size)
         if getattr(self, "_fv_key", None) != key:
             self._fv = np.stack([self.footprint_values(k) for k in range(3)])
             self._fv_key = key
         g = self.grid_size
         yy, xx = np.mgrid[0:g, 0:g]
-        d = np.maximum(np.abs(xx - x), np.abs(yy - y))
-        score = (self._fv / (1.0 + d[None])).max(axis=0)
+        if self.plan_feats == 2:
+            D = self.travel_distance(x, y)
+            alt = self.alt[a] if a is not None else 0
+            dk = np.abs(np.arange(3) - alt)[:, None, None]
+            score = np.where(np.isfinite(D)[None], self._fv / (1.0 + np.where(np.isfinite(D), D, 0)[None] + dk), 0.0)
+            blocked = ~self.free
+            if getattr(self, "link_mask", None) is not None:
+                blocked = blocked | ~self.link_mask
+            score = np.where(blocked[None], 0.0, score)
+            if a is not None:
+                score[alt, y, x] = 0.0  # just searched it from here
+            score = score.max(axis=0)
+            d = np.where(np.isfinite(D), D, 2 * g)
+        else:
+            d = np.maximum(np.abs(xx - x), np.abs(yy - y))
+            score = (self._fv / (1.0 + d[None])).max(axis=0)
         score[y, x] = 0.0
         top = max(float(score.max()), 1e-12)
         sector = ((np.arctan2(yy - y, xx - x) + np.pi) / (2 * np.pi) * 8).astype(int) % 8
@@ -1298,6 +1315,17 @@ class FieldEnv(GridSearchEnv):
                 out[k] = score.flat[i] / top
                 out[8 + k] = d.flat[i] / g
         return out
+
+    def travel_distance(self, x, y) -> np.ndarray:
+        """Shortest-path steps from (x, y) to every cell around obstacles (inf where
+        unreachable), cached per map version."""
+        key = (x, y, self.map_version, self.grid_size, getattr(self, "grid_epoch", 0))
+        cache = self.__dict__.setdefault("_dcache", {})
+        if key not in cache:
+            if len(cache) > 4096:
+                cache.clear()
+            cache[key] = distance_fields(self.free, [(int(x), int(y))], self.scenario.corner_cutting)[0]
+        return cache[key]
 
     def state(self) -> np.ndarray:
         """Critic input (training only): pooled maps at a fixed size, plus the truth."""
