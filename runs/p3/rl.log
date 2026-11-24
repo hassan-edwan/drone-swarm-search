@@ -1,0 +1,67 @@
+[targets] validation at start (the rule): {'wilderness': 0.375, 'urban': 0.7934523809523809, 'score': 0.5842261904761905}
+[targets] iter 1/60 decisions 2440 found 0.59 kl 0.0000 ent 0.000 106s
+[targets] iter 2/60 decisions 1797 found 0.69 kl 0.0000 ent 0.000 184s
+[targets] iter 3/60 decisions 1937 found 0.51 kl 0.0000 ent 0.000 293s
+[targets] iter 4/60 decisions 2066 found 0.52 kl 0.0015 ent 2.625 359s
+[targets] iter 5/60 decisions 1735 found 0.56 kl 0.0106 ent 2.561 438s
+[targets] iter 6/60 decisions 1919 found 0.43 kl 0.0175 ent 2.989 557s
+[targets] iter 7/60 decisions 2412 found 0.48 kl 0.0142 ent 2.902 688s
+[targets] iter 8/60 decisions 1678 found 0.54 kl 0.0311 ent 2.498 785s
+[targets] iter 9/60 decisions 2114 found 0.37 kl 0.0083 ent 2.403 936s
+[targets] iter 10/60 decisions 2261 found 0.42 kl 0.0137 ent 2.555 1057s
+[targets] validation: {'wilderness': 0.375, 'urban': 0.8026785714285715, 'score': 0.5888392857142857} (best 0.589)
+[targets] iter 11/60 decisions 1989 found 0.49 kl 0.0040 ent 2.476 1215s
+[targets] iter 12/60 decisions 1969 found 0.58 kl 0.0117 ent 2.457 1278s
+[targets] iter 13/60 decisions 2074 found 0.61 kl 0.0023 ent 2.755 1364s
+[targets] iter 14/60 decisions 1799 found 0.61 kl 0.0044 ent 2.816 1457s
+[targets] iter 15/60 decisions 2080 found 0.52 kl 0.0097 ent 2.433 1562s
+[targets] iter 16/60 decisions 2658 found 0.45 kl 0.0080 ent 2.799 1672s
+[targets] iter 17/60 decisions 1703 found 0.45 kl 0.0041 ent 2.595 1760s
+[targets] iter 18/60 decisions 1962 found 0.50 kl 0.0061 ent 2.723 1848s
+[targets] iter 19/60 decisions 1838 found 0.66 kl 0.0030 ent 2.269 1921s
+[targets] iter 20/60 decisions 3704 found 0.35 kl 0.0043 ent 2.794 2092s
+[targets] validation: {'wilderness': 0.375, 'urban': 0.8443452380952381, 'score': 0.609672619047619} (best 0.610)
+[targets] iter 21/60 decisions 1729 found 0.46 kl 0.0044 ent 2.439 2229s
+[targets] iter 22/60 decisions 1780 found 0.62 kl 0.0038 ent 2.622 2305s
+[targets] iter 23/60 decisions 2283 found 0.53 kl 0.0014 ent 2.579 2394s
+[targets] iter 24/60 decisions 1939 found 0.51 kl 0.0030 ent 2.651 2508s
+[targets] iter 25/60 decisions 2528 found 0.48 kl 0.0016 ent 2.800 2637s
+[targets] iter 26/60 decisions 1985 found 0.72 kl 0.0024 ent 2.487 2704s
+[targets] iter 27/60 decisions 2504 found 0.54 kl 0.0019 ent 2.608 2801s
+[targets] iter 28/60 decisions 1781 found 0.46 kl 0.0009 ent 2.640 2914s
+[targets] iter 29/60 decisions 2355 found 0.41 kl 0.0004 ent 2.889 3060s
+[targets] iter 30/60 decisions 2254 found 0.51 kl 0.0007 ent 2.807 3193s
+[targets] validation: {'wilderness': 0.5, 'urban': 0.8193452380952381, 'score': 0.659672619047619} (best 0.660)
+[targets] iter 31/60 decisions 1546 found 0.48 kl 0.0010 ent 2.860 3322s
+[targets] iter 32/60 decisions 1421 found 0.67 kl 0.0023 ent 2.631 3398s
+[targets] iter 33/60 decisions 1764 found 0.58 kl 0.0011 ent 2.523 3488s
+[targets] iter 34/60 decisions 2123 found 0.47 kl 0.0005 ent 2.848 3618s
+[targets] iter 35/60 decisions 1741 found 0.68 kl 0.0003 ent 3.001 3714s
+[targets] iter 36/60 decisions 1907 found 0.37 kl 0.0010 ent 2.379 3802s
+[targets] iter 37/60 decisions 1545 found 0.43 kl 0.0044 ent 2.537 3901s
+[targets] iter 38/60 decisions 1960 found 0.47 kl 0.0018 ent 2.285 3984s
+[targets] iter 39/60 decisions 1747 found 0.56 kl 0.0063 ent 2.669 4057s
+[targets] iter 40/60 decisions 2065 found 0.36 kl 0.0245 ent 2.354 4141s
+[targets] validation: {'wilderness': 0.5, 'urban': 0.7574404761904762, 'score': 0.6287202380952381} (best 0.660)
+[targets] iter 41/60 decisions 2006 found 0.35 kl 0.0138 ent 2.468 4280s
+[targets] iter 42/60 decisions 1976 found 0.62 kl 0.0113 ent 3.011 4383s
+[targets] iter 43/60 decisions 1823 found 0.45 kl 0.0148 ent 2.561 4489s
+[targets] iter 44/60 decisions 1752 found 0.66 kl 0.0059 ent 2.663 4587s
+[targets] iter 45/60 decisions 1856 found 0.44 kl 0.0174 ent 2.695 4702s
+[targets] iter 46/60 decisions 1605 found 0.50 kl 0.0275 ent 2.546 4775s
+[targets] iter 47/60 decisions 1788 found 0.60 kl 0.0186 ent 2.799 4849s
+[targets] iter 48/60 decisions 2349 found 0.52 kl 0.0112 ent 3.005 4972s
+[targets] iter 49/60 decisions 2406 found 0.55 kl 0.0197 ent 2.517 5050s
+[targets] iter 50/60 decisions 2513 found 0.48 kl 0.0135 ent 2.561 5135s
+[targets] validation: {'wilderness': 0.375, 'urban': 0.8034798534798535, 'score': 0.5892399267399268} (best 0.660)
+[targets] iter 51/60 decisions 2267 found 0.55 kl 0.0109 ent 2.867 5265s
+[targets] iter 52/60 decisions 2212 found 0.42 kl 0.0112 ent 2.425 5364s
+[targets] iter 53/60 decisions 2461 found 0.34 kl 0.0103 ent 3.091 5507s
+[targets] iter 54/60 decisions 2274 found 0.28 kl 0.0361 ent 2.267 5650s
+[targets] iter 55/60 decisions 2136 found 0.61 kl 0.0149 ent 2.846 5758s
+[targets] iter 56/60 decisions 1916 found 0.43 kl 0.0130 ent 2.431 5827s
+[targets] iter 57/60 decisions 1920 found 0.51 kl 0.0136 ent 3.059 5933s
+[targets] iter 58/60 decisions 1738 found 0.66 kl 0.0081 ent 2.278 6013s
+[targets] iter 59/60 decisions 1613 found 0.55 kl 0.0099 ent 2.617 6094s
+[targets] iter 60/60 decisions 2536 found 0.39 kl 0.0055 ent 2.689 6207s
+[targets] validation: {'wilderness': 0.5, 'urban': 0.755357142857143, 'score': 0.6276785714285715} (best 0.660)
