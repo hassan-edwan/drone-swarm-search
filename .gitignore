@@ -6,3 +6,9 @@ results/
 *.egg-info/
 .venv/
 logs/
+# real-site demo: downloaded photos and recorded missions (re-made by the scripts)
+sites/*/photo.jpg
+sites/*/texture_*.png
+sites/*/blocks/
+sites/*/mission_*.pkl
+sites/*/*.log

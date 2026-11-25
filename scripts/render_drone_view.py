@@ -38,7 +38,7 @@ N_PX = 300
 SUB = 3  # frames per environment step (the camera pans between cells)
 MODE = {"rtb": "low battery: flying home", "landed": "landed: battery swap", "link": "no radio link: flying home",
         "weather": "gusts: flying home", "overwatch": "holding over the find", "nofly_exit": "leaving a no-fly zone"}
-DIRS = ["east", "north-east", "north", "north-west", "west", "south-west", "south", "south-east"]
+DIRS = ["north-west", "north", "north-east", "west", "east", "south-west", "south", "south-east"]  # swarmsearch.env.MOVES order
 
 
 def act_name(a) -> str:

@@ -1,0 +1,17 @@
+{
+ "lat": 39.6385,
+ "lon": -77.473,
+ "size_m": 11600.0,
+ "dem_m": 30.0,
+ "bbox": [
+  -77.54065755081267,
+  39.586030305771665,
+  -77.40534244918733,
+  39.690969694228336
+ ],
+ "photo_px": 6144,
+ "sources": {
+  "elevation": "AWS Terrain Tiles (USGS 3DEP)",
+  "photo": "USDA NAIP via USGS National Map"
+ }
+}
