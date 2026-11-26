@@ -12,3 +12,7 @@ sites/*/texture_*.png
 sites/*/blocks/
 sites/*/mission_*.pkl
 sites/*/*.log
+sites/*/coarse_points_*.npz
+sites/*/fine_raw_*.npz
+sites/*/fine_points.npz
+sites/_cache/

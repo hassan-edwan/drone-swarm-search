@@ -92,18 +92,44 @@ def light_level(hour: float) -> float:
     return LIGHT["night"]
 
 
-def conditions(canopy, rubble, smoke, water, hour: float, air_c: float, rain: bool) -> tuple[np.ndarray, np.ndarray]:
-    """(ordinary camera, thermal) detection factors per cell."""
-    rgb = light_level(hour) * (1 - 0.85 * canopy) * np.where(rubble, 0.6, 1.0) * (1 - smoke)
+def conditions(canopy, rubble, smoke, water, hour: float, air_c: float, rain: bool,
+               model: str = "visibility") -> tuple[np.ndarray, np.ndarray]:
+    """(ordinary camera, thermal) detection factors per cell.
+
+    "visibility" (default): what matters under trees is how much of the
+    ground is visible from the air (thermal drone wildlife surveys in forest,
+    Ecological Informatics 2023: "estimating ground surface visibility"), i.e. the canopy's gap fraction (1 - cover; with real
+    sites, measured by lidar). Thermal needs only part of a warm body to show
+    (factor gap ** 0.5); an ordinary camera needs more of the person and
+    light (gap ** 1.2). Calibrated so that one pass over dense leaf-on forest
+    (cover 0.9) finds a person with thermal about 20% of the time in good
+    contrast, below the <25% reported for dense forest (thermal carcass
+    searches, Animals 2025), and open ground is near certain; single-view thermal in
+    dense forest is known to be poor (Schedl et al. 2020, airborne optical
+    sectioning: 38 of 42 hidden people found only by combining many views,
+    which the per-direction occlusion below rewards).
+    "linear": the earlier model (thermal kept 75% of its open-ground rate
+    under full canopy), for reproducing older results.
+    """
+    if model == "linear":
+        rgb_c, th_c = 1 - 0.85 * canopy, 1 - 0.25 * canopy
+    else:
+        gap = np.clip(1 - canopy, 0.0, 1.0)
+        rgb_c, th_c = gap ** 1.2, gap ** 0.5
+    rgb = light_level(hour) * rgb_c * np.where(rubble, 0.6, 1.0) * (1 - smoke)
     rgb = rgb * np.where(water, 0.7, 1.0) * (0.7 if rain else 1.0)
-    # thermal under canopy fitted to Hambrecht et al. 2019 (register source 23)
-    th = thermal_contrast(air_c, hour, rain) * (1 - 0.25 * canopy) * np.where(rubble, 0.8, 1.0) * (1 - 0.3 * smoke)
+    th = thermal_contrast(air_c, hour, rain) * th_c * np.where(rubble, 0.8, 1.0) * (1 - 0.3 * smoke)
     return rgb, th
 
 
-def occlusion(canopy, rubble) -> np.ndarray:
-    """Chance a person is hidden from a given direction (drawn once per direction)."""
-    return np.clip(0.05 + 0.55 * canopy + 0.3 * rubble, 0.0, 0.9)
+def occlusion(canopy, rubble, model: str = "visibility") -> np.ndarray:
+    """Chance a person is hidden from a given direction (drawn once per direction).
+    With the visibility model most of the canopy's effect is in conditions(),
+    so this keeps only the part that does not change between looks from the
+    same side (trunks, a crown directly over the person)."""
+    if model == "linear":
+        return np.clip(0.05 + 0.55 * canopy + 0.3 * rubble, 0.0, 0.9)
+    return np.clip(0.05 + 0.35 * canopy + 0.3 * rubble, 0.0, 0.9)
 
 
 def view_class(alt: int, dx: int, dy: int) -> int:

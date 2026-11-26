@@ -357,14 +357,14 @@ class FieldEnv(GridSearchEnv):
             level = w.river_level + sc.water_rise * self.t / self.fam.max_steps
             self.water = w.elev < level
         rgb, th = sn.conditions(w.canopy, w.rubble | self.collapsed, self.smoke, self.water, self.hour(), sc.air_c,
-                                self.rain_on)
+                                self.rain_on, sc.canopy_model)
         self.C_rgb, self.C_th = rgb, th
         map_rubble = (self.views["base"] if self.views else self._v).map.rubble
         rgb_m, th_m = sn.conditions(w.map_canopy, map_rubble, self.smoke, self.water, self.hour(), sc.air_c,
-                                    self.rain_on)
+                                    self.rain_on, sc.canopy_model)
         self.C_model = np.maximum(rgb_m, th_m)
-        self.occ_true = sn.occlusion(w.canopy, w.rubble | self.collapsed)
-        self.occ_model = sn.occlusion(w.map_canopy, map_rubble)
+        self.occ_true = sn.occlusion(w.canopy, w.rubble | self.collapsed, sc.canopy_model)
+        self.occ_model = sn.occlusion(w.map_canopy, map_rubble, sc.canopy_model)
         self.FA_true = sn.false_alarm_rate(sc.family, w.canopy, w.rubble | self.collapsed, self.hour(),
                                            0.001) * sc.fa_scale
         if self._tfr is not None:
