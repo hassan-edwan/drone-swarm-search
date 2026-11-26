@@ -25,6 +25,7 @@ stop, re-plan and reach the spot.
 """
 
 import argparse
+import itertools
 import json
 import math
 import os
@@ -600,7 +601,16 @@ def main():
     # drawn (or the ground) is between it and the drone.
     solid = T.occ > 0
 
+    def free(q, kv):
+        i, j = T.ij(q[0], q[1])
+        kq = int(math.floor(q[2] - (T.dtm[i, j] - z0)))
+        return kq >= 0 and not (kq < kv and solid[i, j, min(kq, w3.NZ - 1)])
+
     def clear(e, pos, kv):
+        """Nothing drawn within about 1.5 m of the camera, or on its line of sight to the drone."""
+        for d in itertools.product((-1.5, 0.0, 1.5), repeat=3):
+            if not free(e + np.array(d), kv):
+                return False
         for u in np.linspace(0.0, 1.0, 50):
             q = e + u * (pos - e)
             if np.linalg.norm(q - pos) < 1.5:
