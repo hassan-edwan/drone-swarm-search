@@ -142,8 +142,9 @@ def main():
                 continue
             if k < under_done[d]:
                 continue
-            p0, p1 = cxy(a0["cell"]), cxy(a1["cell"])
-            tr = P.cruise(p0, p1, a1["alt_m"], z0=z0)
+            p1 = cxy(a1["cell"])
+            p0 = (trajs[d][-1][1], trajs[d][-1][2]) if trajs[d] else cxy(a0["cell"])  # from where it really is
+            tr = P.cruise(p0, p1, a1["alt_m"], z0=z0, agl0=a0["alt_m"])
             dur = tr[-1][0] if tr[-1][0] > 0 else fam.step_s
             for t, x, y, z, m in (tr[1:] if trajs[d] else tr):
                 trajs[d].append((t0 + t * fam.step_s / max(dur, 1e-6), x, y, z, m))

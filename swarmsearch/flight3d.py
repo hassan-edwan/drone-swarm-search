@@ -221,14 +221,16 @@ class Planner:
             return self.s.ground(x, y)
         return self.outer.ground(x, y) if self.outer is not None else 0.0
 
-    def cruise(self, p0, p1, agl, z0=None, dt=0.5):
-        """Straight cruise from p0 to p1 (x, y) at agl, following terrain and obstacles,
-        with the drone's climb and descent rates. Returns [(t, x, y, z, mode)]."""
+    def cruise(self, p0, p1, agl, z0=None, dt=0.5, agl0=None):
+        """Straight cruise from p0 to p1 (x, y) at agl (changing from agl0 to agl along the way),
+        following terrain and obstacles, with the drone's climb and descent rates; starts at
+        height z0 when given. Returns [(t, x, y, z, mode)]."""
         d = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
         n = max(2, int(d / (CRUISE_MPS * dt)) + 1)
         xs = np.linspace(p0[0], p1[0], n)
         ys = np.linspace(p0[1], p1[1], n)
-        want = np.array([self.cruise_alt(x, y, agl) or np.nan for x, y in zip(xs, ys)])
+        aglv = np.linspace(agl if agl0 is None else agl0, agl, n)
+        want = np.array([self.cruise_alt(x, y, h) or np.nan for x, y, h in zip(xs, ys, aglv)])
         want = np.where(np.isnan(want), np.nanmax(want) if np.isfinite(want).any() else 0.0, want)
         seg = d / (n - 1) if n > 1 else 0.0
         up, down = CLIMB_MPS / CRUISE_MPS * seg, DESCEND_MPS / CRUISE_MPS * seg
@@ -239,9 +241,11 @@ class Planner:
             z[k] = max(z[k], z[k + 1] - up)
         for k in range(1, n):
             z[k] = max(z[k], z[k - 1] - down)
-        if z0 is not None and z0 > z[0]:
+        if z0 is not None:
+            # continue from the current height: no faster than the climb and descent rates,
+            # except where an obstacle ahead needs it (then the profile above wins)
             for k in range(n):
-                z[k] = max(z[k], z0 - down * k)
+                z[k] = max(z[k], z0 - down * k) if z0 > z[k] else max(min(z[k], z0 + up * k), want[k])
         t = np.arange(n) * seg / CRUISE_MPS
         return [(float(t[k]), float(xs[k]), float(ys[k]), float(z[k]), "cruise") for k in range(n)]
 

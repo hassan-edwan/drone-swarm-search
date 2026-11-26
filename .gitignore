@@ -19,3 +19,4 @@ sites/_cache/
 sites/*/in_*.npy
 sites/*/mission3d_*.pkl
 results_realism.log
+sites/*/sitl_runs/
