@@ -350,17 +350,17 @@ def _init(site_dir, rec_path):
     M = w3.load(Path(site_dir) / "world_map.npz")
     T = w3.load(Path(site_dir) / f"world_truth_{rec['world']}.npz")
     p, drone, slabs = build_scene(site_dir, M, T, rec["box"], rec["z0"])
-    _W.update(rec=rec, M=M, T=T, p=p, drone=drone, slabs=slabs, hidden=set())
+    _W.update(rec=rec, M=M, T=T, p=p, drone=drone, slabs=slabs)
 
 
 def cut_above(k_cut):
-    """Hide the voxel slabs from k_cut metres above the ground up (None: show all)."""
-    p, slabs, hidden = _W["p"], _W["slabs"], _W["hidden"]
-    want = {s for s in slabs if k_cut is not None and s * SLAB >= k_cut}
-    for s in want ^ hidden:
-        for b in slabs[s]:
-            p.resetBasePositionAndOrientation(b, [0, 0, -2000] if s in want else [0, 0, 0], [0, 0, 0, 1])
-    _W["hidden"] = want
+    """Hide the voxel slabs from k_cut metres above the ground up (None: show all). Every slab is placed on
+    every call, so nothing depends on earlier frames."""
+    p, slabs = _W["p"], _W["slabs"]
+    for s_, bodies in slabs.items():
+        down = k_cut is not None and s_ * SLAB >= k_cut
+        for b in bodies:
+            p.resetBasePositionAndOrientation(b, [0, 0, -2000] if down else [0, 0, 0], [0, 0, 0, 1])
 
 
 def state(rec, t):
