@@ -143,8 +143,18 @@ def _field(family: str, **override):
     return lambda seed: sample_scenario(np.random.default_rng(30_000 + seed), family, **override)
 
 
+def _site(path: str, **override):
+    """wild_mix missions on a real site's terrain, trees, trails and lakes (scripts/real_site)."""
+    def make(seed):
+        cell = float(np.load(path)["cell_m"])
+        return _field("wilderness", site=path, cell_m=cell, **override)(seed)
+    return make
+
+
 FIELD_CONDITIONS = {
     "wild_mix": _field("wilderness"),
+    "wild_real_catoctin": _site("sites/catoctin/site.npz"),
+    "wild_real_hamlet": _site("sites/catoctin_west/site.npz"),
     "urban_mix": _field("urban"),
     "flood_mix_heldout": _field("flood"),
     "wild_mix_adaptive_map": _field("wilderness", adaptive_map=True),

@@ -70,9 +70,12 @@ def main():
     ap.add_argument("--steps", type=int, default=60)
     ap.add_argument("--cell-m", type=float, default=50.0)
     ap.add_argument("--fine-from", default="sites/catoctin/fine1.npz")
-    ap.add_argument("--test-target", type=float, nargs=2, default=(-140.5, 225.5),
-                    help="planner test after the mission: a spot under trees behind houses (x y), or none")
+    ap.add_argument("--test", default="demo", choices=["demo", "random", "none"],
+                    help="planner test after the mission: the demo spot behind houses, a random spot under "
+                         "trees in the detailed area, or none")
+    ap.add_argument("--test-target", type=float, nargs=2, default=(-140.5, 225.5))
     ap.add_argument("--test-start", type=float, nargs=2, default=(-80.5, 285.5))
+    ap.add_argument("--out-dir", default="", help="where to write (default: the site folder)")
     ap.add_argument("--shift", type=float, nargs=2, default=(2000.0, 0.0),
                     help="add to the fine data's coordinates to put them in this site's frame")
     a = ap.parse_args()
@@ -153,7 +156,17 @@ def main():
                 zz = trajs[d][-1][3]
                 trajs[d].append((t0 + fam.step_s, x, y, zz, "hover"))
     test = None
-    if a.test_target:
+    if a.test == "random":
+        cand = np.argwhere(s3.veg_top > 10)
+        for _ in range(50):
+            i, j = cand[rng.integers(len(cand))]
+            tx, ty = s3.xy(i, j)
+            if s3.inside(tx, ty, 120):
+                ang = rng.uniform(0, 2 * np.pi)
+                a.test_target = (tx, ty)
+                a.test_start = (tx + 80 * np.cos(ang), ty + 80 * np.sin(ang))
+                break
+    if a.test != "none":
         t_end = max(tr[-1][0] for tr in trajs.values() if tr) + 5.0
         tr, tinfo = P.under_check(tuple(a.test_start), tuple(a.test_target), fam.alt_m[0])
         if tr is not None:
@@ -167,9 +180,11 @@ def main():
                 alerts=alerts, clearance=clear, alt_m=list(fam.alt_m), fine=dict(east0=s3.east0, north0=s3.north0,
                                                                                     size=s3.n),
                 n_trees=len(s3.trees), policy="the rule (BeliefGreedy)", test=test)
-    out = site / f"flight_seed{a.seed}.json"
+    od = Path(a.out_dir) if a.out_dir else site
+    od.mkdir(parents=True, exist_ok=True)
+    out = od / f"flight_seed{a.seed}.json"
     f3.save_traj(out, trajs, info)
-    pickle.dump(dict(frames=frames, alerts=alerts, info=info), open(site / f"mission3d_seed{a.seed}.pkl", "wb"))
+    pickle.dump(dict(frames=frames, alerts=alerts, info=info), open(od / f"mission3d_seed{a.seed}.pkl", "wb"))
     print(f"{out}: {len(frames)} steps, found at step {found_t}; events: "
           + "; ".join(f"{e['drone']} {e['kind']} at {e['t']:.0f}s" + (f" (gap {e['gap'][0]:.0f},{e['gap'][1]:.0f}; "
                       f"{e['under_m']:.0f} m under the crowns; got within {e['reach_m']:.1f} m; planned "

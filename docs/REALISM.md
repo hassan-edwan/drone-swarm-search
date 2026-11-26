@@ -173,13 +173,74 @@ contact. ± is one standard error.
   under the old sensing and radio; the rule needs no retraining, which is
   why it is used here.
 
-## 6. Autopilot in the loop (ArduPilot SITL): not done yet
+## 6. Autopilot in the loop: ArduPilot SITL
 
-The next step is to fly these paths with ArduPilot's software-in-the-loop
-copter (real flight controller code, simulated physics and wind) over
-MAVLink, so the same code can later fly real aircraft. ArduPilot publishes
-prebuilt SITL binaries; downloading and running one was blocked by this
-session's permissions, so this waits for approval.
+`scripts/real_site/sitl_fly.py` flies the planned 3D paths with ArduPilot's
+copter firmware in software-in-the-loop: the real flight-control code with
+simulated physics, sensors, GPS and wind (`SIM_WIND_SPD`, with turbulence),
+one copter process per drone, over MAVLink, as a ground station or companion
+computer would. Setup per copter: GUIDED mode, arm, take off, then position
+targets.
+
+- **A flyable clock.** The search grid moves one cell per step, diagonals and
+  sprints included, with corners at full speed. Before flying, each path gets
+  a speed profile a real quad can fly: at most 20 m/s (about what a SAR quad
+  like the M30T is rated for), 4 m/s up, 3 m/s down, 4 m/s² of acceleration,
+  slowing for sharp turns.
+- **Path following.** The target sent to ArduPilot is a short way ahead of
+  the closest point on the path: 1.5 s ahead in cruise, 0.6 s under the
+  canopy. A copter that falls behind catches up along the path instead of
+  cutting corners.
+- **Checking the flown track.** It is checked against the lidar obstacles
+  afterwards (SITL itself has no trees). SITL's ground is flat, so its home
+  is put at the lowest terrain of the site; heights are compared with the
+  real terrain.
+- **Firmware note.** ArduCopter 4.7 renamed its speed and angle parameters
+  to SI units (`WP_SPD` in m/s, `ATC_ANGLE_MAX` in degrees). The script
+  reads every parameter back after setting it.
+
+Demo mission (seed 103 on the hamlet site) plus the planner test:
+
+| | Wind 5 m/s | Wind 10 m/s |
+|---|---|---|
+| Off the path, mean (worst drone) | 0.1–0.5 m (max 2.0 m) | 0.1–3.3 m (max 22 m) |
+| Under the canopy: off the path / height, worst | 0.38 m / 0.47 m | 0.49 m / 0.31 m (test drone) |
+| Closest flown: trunk / building / crown above | 3.0 / 5.1 / 3.2 m | 3.1 / 5.1 / 3.1 m |
+| Extra time: flyable plan vs grid clock; ArduPilot on top | +13–39%; +4–28 s per drone | same; +33–91 s |
+
+What this shows:
+
+- **ArduPilot follows the under-canopy routes to within half a metre.** In
+  10 m/s wind the cruise legs drift and lag much more; that is near the
+  operating limit of small quads anyway.
+- **The search grid's clock is optimistic.** Flown at real speeds, slowing
+  for corners, the same moves take 13–39% longer. A grid policy should pay
+  for diagonals, sprints and turns as the aircraft does. This is the clearest
+  "sim-to-real" gap found so far.
+- **A first batch run found one close call.** On two missions it found a
+  flight passing 0.6 m under a crown: the crown-bottom estimate from leaf-off
+  lidar is noisier than the undergrowth test the planner uses. The cluster
+  run measures how often.
+
+## 7. Running at scale on Zaratan
+
+Three independent jobs (scripts/cluster/realism_*.sbatch, settings in
+realism.env):
+
+| Job | What | Time on one 128-core node |
+|---|---|---|
+| realism_eval | the comparison table above with 500 missions per row | about 1–2 h |
+| realism_sitl | 100 hamlet missions × winds 0, 5, 10 m/s in ArduPilot, each with a random under-canopy check | about 1 h |
+| realism_targets | retrain the target-choosing policy under the new defaults (400 iterations), then evaluate it against the rule on 5 conditions incl. both real sites | about 8–12 h |
+
+On a login node, once (after `setup.sh`):
+
+    bash scripts/cluster/setup_realism.sh           # pymavlink, laspy, scipy; ArduPilot SITL; full-density lidar
+    bash scripts/cluster/submit_realism.sh -A msml642-class
+
+Results: `runs/realism/eval/results.md`, `runs/realism/sitl/summary.md`,
+`runs/realism/targets/results/results_targets.md`. Re-submitting a job skips
+or resumes finished work.
 
 ## Limits
 
