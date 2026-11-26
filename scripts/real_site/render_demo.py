@@ -44,7 +44,12 @@ M_PER_DEG_LAT = 110_540.0
 BLOCK_M = 400.0
 BLOCK_PX = 1024
 REAL = "Real: terrain (USGS 3DEP) and aerial photo (USDA NAIP), Catoctin Mountain Park, Maryland"
-SIM = "Simulated: drones, missing hiker, detections. Drones decide from the simulator's sensor model, not these images."
+SIM = "Simulated: drones, missing {who}, detections. Drones decide from the simulator's sensor model, not these images."
+
+
+def person_label(mission) -> str:
+    """The missing person's type, for captions (the mission's category: hiker, hunter, ...)."""
+    return {"dementia": "person with dementia", "child": "child"}.get(mission.get("category"), mission.get("category") or "person")
 
 
 def font(n, bold=False):
@@ -291,7 +296,7 @@ def make_frame(job):
     found = bool(a1["found"].any()) if f > 0.5 else bool(a0["found"].any())
     pc = np.asarray(a0["people"][0], float) + person_offset(mission["seed"])
     pin(pc, (60, 230, 90) if found else (230, 40, 40),
-        "hiker FOUND" if found else "missing hiker (drones do not know)", h=180.0)
+        f"{person_label(mission)} FOUND" if found else f"missing {person_label(mission)} (drones do not know)", h=180.0)
     # drones: recent tracks and markers
     names = sorted(a0["drones"])
     for k, a in enumerate(names):
@@ -329,13 +334,13 @@ def make_frame(job):
     dc.rectangle([0, 0, LW, 70], fill=(0, 0, 0, 150))
     hour = lerp(a0["hour"], a1["hour"], f)
     mins = (si + f) * mission["step_s"] / 60
-    dc.text((16, 8), f"Drone swarm search for a lost hiker  ·  mission time {int(mins):d} min  ·  local time {hhmm(float(hour))}",
+    dc.text((16, 8), f"Drone swarm search for a lost {person_label(mission)}  ·  mission time {int(mins):d} min  ·  local time {hhmm(float(hour))}",
             font=font(24, True), fill=(255, 255, 255, 255))
     dc.text((16, 42), f"{mission['n_drones']} drones, {mission['policy']}  ·  area 11.6 x 11.6 km  ·  markers not to scale",
             font=fs, fill=(210, 210, 210, 255))
     dc.rectangle([0, H - 62, LW, H], fill=(0, 0, 0, 160))
     dc.text((16, H - 56), REAL, font=fs, fill=(170, 230, 170, 255))
-    dc.text((16, H - 30), SIM, font=fs, fill=(255, 200, 140, 255))
+    dc.text((16, H - 30), SIM.format(who=person_label(mission)), font=fs, fill=(255, 200, 140, 255))
     view = Image.alpha_composite(view, cap)
     canvas.paste(view.convert("RGB"), (0, 0))
 
@@ -403,7 +408,7 @@ def make_frame(job):
         u, v = (np.asarray(dd["true"], float) + 0.5) * sc
         dm.ellipse([u - 5, v - 5, u + 5, v + 5], fill=COLS[k % len(COLS)], outline=(0, 0, 0))
     canvas.paste(mp.convert("RGB"), (mx + 8, my + 28))
-    dc.text((mx + 8, my + 4), "Team map: where the hiker probably is", font=font(16, True), fill=(230, 230, 230))
+    dc.text((mx + 8, my + 4), f"Team map: where the {person_label(mission)} probably is", font=font(16, True), fill=(230, 230, 230))
     tx = mx + ms + 18
     lines = ["red = likely", "clear = searched", "or unlikely", "", "dots = drones", "",
              f"{len(linked)}/{len(names)} drones", "in radio contact"]

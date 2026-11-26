@@ -37,6 +37,22 @@ flown by the learned target policy (`runs/p3/rl/best.pt`, greedy). The hiker
 is found at step 258 of 299 (about 77 minutes in). The video runs at about
 54 times real time (one 18 s simulator step every 8 frames at 24 fps).
 
+## The same site flown by the rule
+
+- `results/figures/rule_demo.mp4`: the 3D view, as above, flown by the rule
+  (BeliefGreedy) instead of the learned policy.
+- `results/figures/rule_cameras.mp4`: the four camera feeds for that mission.
+
+The mission: wild_mix scenario seed 7 (a missing hunter, 4 drones). The rule
+finds the hunter at step 63 (about 19 minutes in); the mission ends at step 223.
+On seed 4, the learned policy's demo mission, the rule does not find the hiker in
+the 299 steps (about 90 minutes). Of seeds 0-12 the rule finds the person in two
+(7 and 10). Captions name the mission's person (hiker, hunter, ...).
+
+    python scripts/real_site/run_mission.py --site sites/catoctin --seed 7 --policy rule
+    ~/venv3d/bin/python scripts/real_site/render_cameras.py --seed 7 --out results/figures/rule_cameras.mp4
+    ~/venv3d/bin/python scripts/real_site/render_demo.py --seed 7 --out results/figures/rule_demo.mp4
+
 ## Making it again
 
     python scripts/real_site/fetch_site.py --lat 39.6385 --lon -77.4730 --out sites/catoctin

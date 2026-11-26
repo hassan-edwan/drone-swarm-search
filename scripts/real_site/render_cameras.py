@@ -28,7 +28,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from render_demo import (COLS, HALF_FOV, REAL, Site, crop, draw_person, font, hhmm, lerp,  # noqa: E402
+from render_demo import (COLS, person_label, HALF_FOV, REAL, Site, crop, draw_person, font, hhmm, lerp,  # noqa: E402
                          person_offset)
 
 W, H = 1920, 1080
@@ -205,7 +205,7 @@ def make(job):
     mins = (si + f) * m["step_s"] / 60
     found = F[si]["found"].any()
     dc.text((20, 12), f"Drone camera feeds  ·  mission time {int(mins)} min  ·  local time {hhmm(hour)}"
-            + ("  ·  HIKER FOUND" if found else ""), font=font(26, True), fill=(255, 255, 255) if not found else (90, 240, 120))
+            + (f"  ·  {person_label(m).upper()} FOUND" if found else ""), font=font(26, True), fill=(255, 255, 255) if not found else (90, 240, 120))
     grid_w = cols * px + (cols - 1) * 16
     x0 = 20
     for k, a in enumerate(names):
@@ -247,12 +247,12 @@ def make(job):
         dc.text((sx, ty + 26), "white square = last seen", font=font(15), fill=(200, 200, 200))
         notes = ["Each feed: real aerial photo at the", "drone's true height and 84° view,", "turned so flight direction is up.",
                  "", "Between 18 s simulator steps the", "view glides along the path:", f"video runs about {m['step_s'] * FPS / sub:.0f}x real time.",
-                 "", "The hiker (red jacket) is drawn in", "at true size: about 1.7 m. Fainter", "= partly hidden by trees."]
+                 "", f"The {person_label(m)} (red jacket) is drawn in", "at true size: about 1.7 m. Fainter", "= partly hidden by trees."]
         for i, s in enumerate(notes):
             dc.text((sx, ty + 62 + 21 * i), s, font=font(15), fill=(190, 190, 190))
     dc.rectangle([0, H - bot, W, H], fill=(0, 0, 0))
     dc.text((20, H - bot + 6), REAL, font=font(16), fill=(170, 230, 170))
-    dc.text((20, H - bot + 28), "Simulated: drones, missing hiker, detections. The drones decide from the simulator's sensor model, not these images.",
+    dc.text((20, H - bot + 28), f"Simulated: drones, missing {person_label(m)}, detections. The drones decide from the simulator's sensor model, not these images.",
             font=font(16), fill=(255, 200, 140))
     return fi, canvas
 
