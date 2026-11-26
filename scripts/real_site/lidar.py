@@ -237,9 +237,22 @@ def layers(p, cls, first, east0, north0, size_m, cell, bldg_frac=None):
     n_b = stat_grid(i[fr & b], j[fr & b], None, n, "count")
     bldg = bldg_frac if bldg_frac is not None else np.where(n_first > 0, n_b / np.maximum(n_first, 1), 0.0)
     bh = np.nan_to_num(stat_grid(i[b], j[b], hag[b], n, "p90"), nan=0.0)
+    # crown area: share of 2 m sub-cells with vegetation above 3 m. Most 3DEP lidar is flown
+    # leaf-off, so the share of returns blocked (cover) understates summer canopy; the area
+    # under crowns is close to leaf-on cover.
+    dens = len(p) / size_m ** 2
+    sub_m = max(2.0, math.sqrt(4.0 / max(dens, 1e-6)))  # about 4 points per sub-cell
+    sub = max(1, int(round(cell / sub_m)))
+    i2, j2, ok2, n2 = grid_index(p, east0, north0, size_m, cell / sub)
+    v2 = veg & (hag > 3) & ok2
+    crown2 = np.zeros((n2, n2))
+    crown2[i2[v2], j2[v2]] = 1.0
+    crown = crown2.reshape(n, sub, n, sub).mean((1, 3)) if sub > 1 else crown2
+    if bldg_frac is not None:
+        crown = crown * (1 - bldg_frac)
     w = cls == 9
     water = np.where(n_first > 0, stat_grid(i[fr & w], j[fr & w], None, n, "count") / np.maximum(n_first, 1), 0.0)
-    return dict(dtm=dtm, chm=chm, cover=cover, bldg=bldg, bldg_h=bh, water=water, cell=cell, size_m=size_m,
+    return dict(dtm=dtm, chm=chm, cover=cover, crown=crown, bldg=bldg, bldg_h=bh, water=water, cell=cell, size_m=size_m,
                 east0=east0, north0=north0), (p, cls, hag)
 
 
@@ -294,7 +307,7 @@ def main():
         L, _ = layers(p, cls, first, 0.0, 0.0, size, 10.0, bf)
         np.savez_compressed(site / "lidar10.npz", **L)
         print(f"{len(p):,} points ({len(p) / size ** 2:.3f}/m2) in {time.time() - t0:.0f}s; "
-              f"canopy cover {L['cover'].mean():.0%}, canopy height median {np.median(L['chm'][L['cover'] > 0.5]):.0f} m, "
+              f"canopy cover {L['cover'].mean():.0%} (leaf-off returns), crown area {L['crown'].mean():.0%}, canopy height median {np.median(L['chm'][L['cover'] > 0.5]):.0f} m, "
               f"buildings {(L['bldg'] > 0.3).mean():.2%} of area")
     else:
         box = box_merc(lat0, lon0, a.east, a.north, a.size_m)

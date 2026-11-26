@@ -16,3 +16,6 @@ sites/*/coarse_points_*.npz
 sites/*/fine_raw_*.npz
 sites/*/fine_points.npz
 sites/_cache/
+sites/*/in_*.npy
+sites/*/mission3d_*.pkl
+results_realism.log

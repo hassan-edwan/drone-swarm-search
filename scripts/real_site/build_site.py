@@ -33,6 +33,8 @@ def to_grid(a, n):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--site", default="sites/catoctin")
+    ap.add_argument("--season", choices=["leaf-on", "leaf-off"], default="leaf-on",
+                    help="tree cover for summer (area under crowns) or winter (lidar returns blocked)")
     ap.add_argument("--cell-out", type=float, default=0.0, help="search grid cell size (default: from the category)")
     a = ap.parse_args()
     site = Path(a.site)
@@ -42,8 +44,9 @@ def main():
     src = "photo"
     if (site / "lidar10.npz").exists():
         L = np.load(site / "lidar10.npz")
-        dem, canopy = to_grid(L["dtm"], n), to_grid(L["cover"], n)
-        src = "lidar"
+        key = "crown" if a.season == "leaf-on" and "crown" in L else "cover"
+        dem, canopy = to_grid(L["dtm"], n), to_grid(L[key], n)
+        src = f"lidar ({a.season}: {key})"
     np.save(site / "in_dem.npy", dem)
     np.save(site / "in_canopy.npy", canopy)
     trail = np.zeros((n, n), bool)

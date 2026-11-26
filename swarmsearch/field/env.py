@@ -280,6 +280,7 @@ class FieldEnv(GridSearchEnv):
         self.n_alarms = self.n_false_alarms = self.n_bumps = self.n_slips = self.n_gps_off = 0
         self.n_near = self.n_crash = self.n_swaps = self.n_launch_fail = 0
         self.n_under = 0  # alerts checked from under the trees
+        self.n_under_finds = 0  # finds confirmed from such a check
         self.linked_steps = 0.0
         # Evidence and others in the area (K7, S8), on their own random stream so that
         # missions without them run exactly as before.
@@ -1144,6 +1145,7 @@ class FieldEnv(GridSearchEnv):
             x, y = item["cell"]
             i = item["true"]
             if verdict == "confirm" and i is not None and not self.found[i]:
+                self.n_under_finds += int(bool(item.get("under")))
                 self.found[i] = True
                 self.found_times.append(self.t)
                 found_now += 1
@@ -1447,6 +1449,7 @@ class FieldEnv(GridSearchEnv):
             "reports": self.n_reports,
             "expanded_min": self.expanded_t * self.fam.step_s / 60.0 if self.expanded_t >= 0 else None,
             "under_checks": self.n_under,
+            "under_finds": self.n_under_finds,
             "coverage": float(self.visited[self.w.walk].mean()),
             "repeat_frac": self.n_repeats / max(1, self.n_visits),
             "collisions": self.n_collisions,
