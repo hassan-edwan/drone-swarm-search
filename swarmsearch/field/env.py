@@ -565,7 +565,7 @@ class FieldEnv(GridSearchEnv):
         # the return reserve uses the wind the drone measures where it is (terrain-shaped), with a margin
         wind = max(sc.wind_mps, 1.25 * self._wind_here(a)) if self._wind_mult_all is not None else sc.wind_mps
         per = fam.step_s / (sc.endurance_min * 60.0) * (1 + 0.02 * wind)
-        return float(steps * per * 1.5 + 0.08)
+        return float(steps * per * 1.5 + 0.12)  # 12% kept for climbing to safe heights, landing and gusts
 
     def _update_modes(self, a):
         """Battery, link loss, weather, no-fly and overwatch decide who the autopilot flies (D1, D6, D8, O1)."""

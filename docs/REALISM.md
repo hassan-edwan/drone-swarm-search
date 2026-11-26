@@ -218,26 +218,35 @@ results/figures/flight3d_demo.mp4: wild_mix seed 103 on the hamlet site at
 ## What the changes do to the results
 
 `scripts/eval_realism.py`: the rule, 100 missions per row, the same missions
-in every row (wild_mix scenarios). On the real sites the terrain, trees,
-trails and lakes are real, with leaf-on cover; the hamlet site also has the
-3D flight limits. All rows have drones always in contact. ± is one standard
-error.
+in every row (wild_mix scenarios, including the season, low cloud, wind and
+failure draws of section 9). On the real sites the terrain, trees, trails
+and lakes are real, with leaf-on or leaf-off cover by season; the hamlet
+site also has the 3D flight limits and the executor's under-canopy
+outcomes. All rows have drones always in contact. ± is one standard error.
 
-| World | Variant | Found | Mean time to first find (min) | Under-canopy checks / mission | Finds from them | False alarms / mission |
-|---|---|---|---|---|---|---|
-| generated wilderness | old sensing | 27% ± 4% | 18 | 0.0 | 0 | 22.6 |
-| generated wilderness | new sensing | 33% ± 5% | 19 | 0.0 | 0 | 19.3 |
-| generated wilderness | new sensing + under-canopy checks | 33% ± 5% | 20 | 3.4 | 0 | 18.5 |
-| real site (Catoctin, lidar) | old sensing | 18% ± 4% | 30 | 0.0 | 0 | 3.9 |
-| real site (Catoctin, lidar) | new sensing | 11% ± 3% | 22 | 0.0 | 0 | 3.4 |
-| real site (Catoctin, lidar) | new sensing + under-canopy checks | 13% ± 3% | 22 | 0.5 | 0 | 3.5 |
-| real site (hamlet, lidar + 3D flight limits) | old sensing | 26% ± 4% | 18 | 0.0 | 0 | 114.9 |
-| real site (hamlet, lidar + 3D flight limits) | new sensing | 27% ± 4% | 14 | 0.0 | 0 | 105.5 |
-| real site (hamlet, lidar + 3D flight limits) | new sensing + under-canopy checks | 27% ± 4% | 14 | 25.8 | 2 | 92.2 |
+| World | Variant | Found | Mean time to first find (min) | Under-canopy checks / mission | Finds from them | False alarms / mission | Drones lost: crashed / emergency landing / bird, per 100 missions |
+|---|---|---|---|---|---|---|---|
+| generated wilderness | old sensing | 32% ± 5% | 20 | 0.0 | 0 | 20.7 | 6 / 0 / 2 |
+| generated wilderness | new sensing | 30% ± 4% | 20 | 0.0 | 0 | 20.2 | 9 / 0 / 1 |
+| generated wilderness | new sensing + under-canopy checks | 30% ± 4% | 20 | 2.5 | 1 | 19.8 | 6 / 0 / 1 |
+| real site (Catoctin, lidar) | old sensing | 14% ± 3% | 26 | 0.0 | 0 | 3.4 | 31 / 0 / 4 |
+| real site (Catoctin, lidar) | new sensing | 8% ± 3% | 16 | 0.0 | 0 | 3.4 | 24 / 1 / 2 |
+| real site (Catoctin, lidar) | new sensing + under-canopy checks | 10% ± 3% | 23 | 0.6 | 0 | 3.5 | 21 / 1 / 1 |
+| real site (hamlet, lidar + 3D flight limits) | old sensing | 34% ± 5% | 18 | 0.0 | 0 | 105.8 | 4 / 6 / 6 |
+| real site (hamlet, lidar + 3D flight limits) | new sensing | 28% ± 4% | 19 | 0.0 | 0 | 100.0 | 2 / 10 / 4 |
+| real site (hamlet, lidar + 3D flight limits) | new sensing + under-canopy checks | 27% ± 4% | 15 | 23.2 | 0 | 86.8 | 3 / 11 / 7 |
 
 - **Dense real forest is much harder.** In the park (86% leaf-on cover) the
-  calibrated sensing finds 11% of people within the 90-minute mission,
-  against 18% with the old model.
+  calibrated sensing finds 8–10% of people within the 90-minute mission,
+  against 14% with the old model.
+- **Drones lost.** About 20–30 per 100 missions in the park, against 5–10
+  elsewhere. In 60 park missions, 8 of the 12 losses were failures or bird
+  strikes with no open spot within reach (the same events at the hamlet
+  are mostly emergency landings). 4 were empty batteries within two cells
+  of the base on the way home: the return reserve was too thin. It is now
+  12% of a battery (was 8%), not yet re-measured; the cluster job will. The
+  failure (0–3% per drone-hour) and bird (1% per hour) rates are
+  assumptions, and they drive this.
 - **Under-canopy checks now happen, but do not find more people.** With the
   trigger fixed, drones make 3.4 checks per mission in generated wilderness,
   0.5 in the park and 26 at the hamlet. The hamlet has about 100 alerts per
@@ -464,8 +473,7 @@ turning back and its extra time in the field simulator. On the cluster,
   - In the field simulator the wind at each search cell (a multiplier per
     cell for 8 directions, in `flight_limits.npz`) drives battery use and
     drift. The return-home reserve uses the wind measured where the drone
-    is, with a 25% margin. Before that change, drones on the park's ridges
-    ran out of battery on the way home.
+    is, with a 25% margin, and keeps 12% of a battery spare.
   - Hamlet site: 0.7–1.3 × the open-ground wind at search height; park:
     0.6–1.5 ×.
 - **Season.** A third of missions are in the leaf-off months
