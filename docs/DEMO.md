@@ -39,9 +39,9 @@ is found at step 258 of 299 (about 77 minutes in). The video runs at about
 
 ## The same site flown by the rule
 
-- `results/figures/rule_demo.mp4`: the 3D view, as above, flown by the rule
+- `results/figures/rule_demo.mp4` (19 s): the 3D view, as above, flown by the rule
   (BeliefGreedy) instead of the learned policy.
-- `results/figures/rule_cameras.mp4`: the four camera feeds for that mission.
+- `results/figures/rule_cameras.mp4` (74 s): the four camera feeds for that mission.
 
 The mission: wild_mix scenario seed 7 (a missing hunter, 4 drones). The rule
 finds the hunter at step 63 (about 19 minutes in); the mission ends at step 223.
