@@ -47,6 +47,15 @@ N_ACTIONS_FIELD = 19
 CLIMB_MPS, DESCEND_MPS = 4.0, 3.0
 LAUNCH_FAIL = 0.02
 OVERWATCH_MAX_S = 900.0
+# Under-canopy check of an alert in forest: from the lowest search height the
+# drone descends through a gap to ~3 m above the ground, flies under the
+# crowns to the alerted spot (alerts are located to a few metres in the
+# image), looks with nothing between camera and person, and climbs back out.
+UNDER_MIN_COVER = 0.5  # tree cover where looking from above stops being enough
+UNDER_RUN_M = 100.0  # horizontal run under the crowns, there and back to a gap
+UNDER_MPS = 2.0  # slow, among trunks
+UNDER_DETECT = 0.9  # thermal at a few metres, no canopy in between; trunks and undergrowth can still hide
+UNDER_FA_DISMISS = 0.97  # an animal or a warm stump is easy to tell apart up close
 LINK_TIMEOUT_S = 30.0
 WEATHER_LIMIT = 12.0  # m/s
 TEAM_MPS = 1.0
@@ -270,6 +279,7 @@ class FieldEnv(GridSearchEnv):
         self.n_visits = self.n_repeats = self.n_collisions = self.n_shield = 0
         self.n_alarms = self.n_false_alarms = self.n_bumps = self.n_slips = self.n_gps_off = 0
         self.n_near = self.n_crash = self.n_swaps = self.n_launch_fail = 0
+        self.n_under = 0  # alerts checked from under the trees
         self.linked_steps = 0.0
         # Evidence and others in the area (K7, S8), on their own random stream so that
         # missions without them run exactly as before.
@@ -467,6 +477,8 @@ class FieldEnv(GridSearchEnv):
     def _auto_action(self, a) -> int:
         """Next move for a drone the autopilot controls."""
         mode = self.mode[a]
+        if mode == "under":
+            return HOVER
         if mode == "overwatch":
             i = self.mode_target[a]
             goal = tuple(int(v) for v in self.people.pos[i]) if not self.people.outside[i] else self.w.base
@@ -528,6 +540,11 @@ class FieldEnv(GridSearchEnv):
                 self.mode_t[a] = 1
                 return
             self.mode[a] = None
+        if mode == "under":
+            self.mode_t[a] -= 1
+            if self.battery[a] <= self._energy_home(a):
+                self.mode[a] = "rtb"  # battery first: the check is abandoned
+            return
         if mode == "overwatch":
             self.mode_t[a] -= 1
             i = self.mode_target[a]
@@ -895,6 +912,8 @@ class FieldEnv(GridSearchEnv):
         self.use_view(a)
         v, sc, rng, w = self._v, self.scenario, self.rng, self.w
         g, r = self.grid_size, sn.R
+        if self.mode[a] == "under":
+            return self._under_look(a) if self.mode_t[a] <= 0 else 0.0
         k = self.alt[a]
         motion = 1.0 if act in (HOVER, CLIMB, DESCEND) else sn.SPRINT_BLUR if act >= SPRINT0 else sn.BLUR
         slant, shift = 1.0, np.zeros(2, dtype=int)
@@ -984,7 +1003,52 @@ class FieldEnv(GridSearchEnv):
             v.N[cls, my, mx] = n + 1
             v.exp_low += detected * n_est / max(s, 1e-6)  # expected finds with the nominal sensor
             reward += REWARD_DETECT * detected * max(1, self.n_free)
+        self._maybe_go_under(a, k, ex, ey)
         return reward
+
+    def _maybe_go_under(self, a, k, ex, ey):
+        """At the lowest height over an unresolved alert in dense forest, check it from under the trees."""
+        sc, fam, v = self.scenario, self.fam, self._v
+        if not sc.under_canopy or k != 0 or self.mode[a] is not None:
+            return
+        if v.cand_t[ey, ex] < 0 or self.w.map_canopy[ey, ex] < UNDER_MIN_COVER:
+            return
+        h = fam.alt_m[0]
+        secs = h / DESCEND_MPS + UNDER_RUN_M / UNDER_MPS + h / CLIMB_MPS
+        self.mode[a] = "under"
+        self.mode_t[a] = max(1, int(np.ceil(secs / fam.step_s)))
+        self.mode_target[a] = (int(ex), int(ey))
+        self.n_under += 1
+
+    def _under_look(self, a) -> float:
+        """The look from under the crowns at the alerted spot; then back to the search."""
+        v, sc, rng, g = self._v, self.scenario, self.rng, self.grid_size
+        ex, ey = self.mode_target[a]
+        tx, ty = (int(c) for c in self.true_pos[a])
+        self.mode[a] = None
+        ppl = self.people
+        here = np.flatnonzero(~self.found & ~ppl.outside & (ppl.pos[:, 0] == tx) & (ppl.pos[:, 1] == ty))
+        seen_i = None
+        for i in here:
+            hide = 0.6 if ppl.hiding[i] else 0.0
+            p = UNDER_DETECT * max(ppl.vis[i], ppl.warm[i]) * (1 - hide) * sc.sensor_scale / 0.75
+            if rng.random() < min(0.98, p):
+                seen_i = int(i)
+                break
+        false = seen_i is None and rng.random() < 0.3 * self.FA_true[ty, tx]
+        if (seen_i is not None or false) and not self._known_spot(v, ex, ey):
+            self.n_alarms += 1
+            self.n_false_alarms += int(seen_i is None)
+            self._send(a, v, dict(cell=(ex, ey), alt=0, true=seen_i, t=self.t, p=0.0, drone=a, under=True,
+                                  dismiss=UNDER_FA_DISMISS))
+        # the map: this spot was checked closely
+        pm = min(0.98, UNDER_DETECT * (v.s_est if sc.adaptive_map else 1.0))
+        detected = self.belief[ey, ex] * pm
+        v.B[:, ey, ex] *= 1 - pm
+        self.belief[ey, ex] -= detected
+        v.cand_t[ey, ex] = -1e9
+        self.last_searched[ey, ex] = self.t
+        return REWARD_DETECT * detected * max(1, self.n_free)
 
     def _search_extras(self, a, k, Gt, tx, ty, ex, ey, factor, v, reports):
         """Clues and others in the footprint (K7, S8): what the camera sees
@@ -1382,6 +1446,7 @@ class FieldEnv(GridSearchEnv):
             "other_alarms": self.n_other_alarms,
             "reports": self.n_reports,
             "expanded_min": self.expanded_t * self.fam.step_s / 60.0 if self.expanded_t >= 0 else None,
+            "under_checks": self.n_under,
             "coverage": float(self.visited[self.w.walk].mean()),
             "repeat_frac": self.n_repeats / max(1, self.n_visits),
             "collisions": self.n_collisions,

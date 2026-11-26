@@ -124,6 +124,7 @@ class FieldScenario:
     p_tfr: float = 0.0  # chance a no-fly zone appears mid-mission (D8)
     rtb_on_link_loss: bool = True  # return when out of contact (D6)
     fail_per_h: float = 0.01  # in-flight failure rate (D6)
+    under_canopy: bool = True  # drones check alerts in dense forest from under the trees
     canopy_model: str = "visibility"  # sensing under trees: "visibility" (gap fraction) or "linear" (earlier model)
     # Radio (C)
     always_linked: bool = True  # every drone always in contact with the base (cellular/satellite/mesh); False: radio model below

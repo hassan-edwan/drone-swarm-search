@@ -63,13 +63,23 @@ class EPT:
         self.b = self.meta["bounds"]
         self._h: dict = {}
 
-    def _hier(self, key="0-0-0-0"):
+    def _hier(self, box, max_depth, key="0-0-0-0"):
+        """Load the index only where it overlaps box, down to max_depth."""
         h = json.loads(get(f"{self.url}/ept-hierarchy/{key}.json"))
+        sub = []
         for k, n in h.items():
+            if int(k.split("-")[0]) > max_depth or not self._overlaps(k, box):
+                continue
             if n == -1:
-                self._hier(k)
+                sub.append(k)
             else:
                 self._h[k] = n
+        with ThreadPoolExecutor(8) as ex:
+            list(ex.map(lambda k: self._hier(box, max_depth, k), sub))
+
+    def _overlaps(self, key, box):
+        x0, y0, x1, y1 = self.node_box(key)
+        return x0 < box[2] and x1 > box[0] and y0 < box[3] and y1 > box[1]
 
     def node_box(self, key):
         d, x, y, z = (int(v) for v in key.split("-"))
@@ -79,7 +89,7 @@ class EPT:
     def nodes(self, box, max_depth):
         """Keys of nodes down to max_depth that overlap box (xmin, ymin, xmax, ymax), in web mercator."""
         if not self._h:
-            self._hier()
+            self._hier(box, max_depth)
         out = []
         for k, n in self._h.items():
             if n <= 0 or int(k.split("-")[0]) > max_depth:
@@ -178,8 +188,34 @@ def stat_grid(i, j, v, n, how):
     return out.reshape(n, n)
 
 
-def layers(p, cls, first, east0, north0, size_m, cell):
-    """Rasters at `cell` metres from local points."""
+def building_raster(polys, east0, north0, size_m, cell):
+    """Share of each cell covered by building footprints (sampled 3 x 3 per cell)."""
+    from matplotlib.path import Path as MPath
+    n = int(round(size_m / cell))
+    sub = 3
+    out = np.zeros((n * sub, n * sub), bool)
+    c = cell / sub
+    for pg in polys:
+        pg = np.asarray(pg, float)
+        j0 = int(np.floor((pg[:, 0].min() - (east0 - size_m / 2)) / c))
+        j1 = int(np.ceil((pg[:, 0].max() - (east0 - size_m / 2)) / c))
+        i0 = int(np.floor(((north0 + size_m / 2) - pg[:, 1].max()) / c))
+        i1 = int(np.ceil(((north0 + size_m / 2) - pg[:, 1].min()) / c))
+        j0, i0 = max(j0, 0), max(i0, 0)
+        j1, i1 = min(j1, n * sub), min(i1, n * sub)
+        if j0 >= j1 or i0 >= i1:
+            continue
+        jj, ii = np.meshgrid(np.arange(j0, j1), np.arange(i0, i1))
+        X = (east0 - size_m / 2) + (jj + 0.5) * c
+        Y = (north0 + size_m / 2) - (ii + 0.5) * c
+        inside = MPath(pg).contains_points(np.c_[X.ravel(), Y.ravel()]).reshape(X.shape)
+        out[i0:i1, j0:j1] |= inside
+    return out.reshape(n, sub, n, sub).mean((1, 3))
+
+
+def layers(p, cls, first, east0, north0, size_m, cell, bldg_frac=None):
+    """Rasters at `cell` metres from local points. bldg_frac: footprint share
+    per cell (building_raster); points there count as building, not tree."""
     i, j, ok, n = grid_index(p, east0, north0, size_m, cell)
     p, cls, first, i, j = p[ok], cls[ok], first[ok], i[ok], j[ok]
     keep = ~np.isin(cls, (7, 18))
@@ -188,6 +224,9 @@ def layers(p, cls, first, east0, north0, size_m, cell):
     dtm = stat_grid(i[g], j[g], p[g, 2], n, "mean")
     dtm = fill_nan(dtm)
     hag = p[:, 2] - dtm[i, j]
+    if bldg_frac is not None:
+        on_b = bldg_frac[i, j] > 0.3
+        cls = np.where(on_b & np.isin(cls, VEG) & (hag > 2), 6, cls)
     veg = np.isin(cls, VEG) & (hag > 2)
     chm = np.nan_to_num(stat_grid(i[veg], j[veg], hag[veg], n, "p95"), nan=0.0)
     fr = first
@@ -196,7 +235,7 @@ def layers(p, cls, first, east0, north0, size_m, cell):
     cover = np.where(n_first > 0, n_hi / np.maximum(n_first, 1), 0.0)
     b = cls == 6
     n_b = stat_grid(i[fr & b], j[fr & b], None, n, "count")
-    bldg = np.where(n_first > 0, n_b / np.maximum(n_first, 1), 0.0)
+    bldg = bldg_frac if bldg_frac is not None else np.where(n_first > 0, n_b / np.maximum(n_first, 1), 0.0)
     bh = np.nan_to_num(stat_grid(i[b], j[b], hag[b], n, "p90"), nan=0.0)
     w = cls == 9
     water = np.where(n_first > 0, stat_grid(i[fr & w], j[fr & w], None, n, "count") / np.maximum(n_first, 1), 0.0)
@@ -250,7 +289,9 @@ def main():
             np.savez(cache, xyz=xyz, cls=cls, first=first)
         print("classes:", dict(zip(*np.unique(cls, return_counts=True))))
         p = to_local(xyz, lat0, lon0)
-        L, _ = layers(p, cls, first, 0.0, 0.0, size, 10.0)
+        bf = building_raster(json.load(open(site / "buildings.json")), 0.0, 0.0, size, 10.0) \
+            if (site / "buildings.json").exists() else None
+        L, _ = layers(p, cls, first, 0.0, 0.0, size, 10.0, bf)
         np.savez_compressed(site / "lidar10.npz", **L)
         print(f"{len(p):,} points ({len(p) / size ** 2:.3f}/m2) in {time.time() - t0:.0f}s; "
               f"canopy cover {L['cover'].mean():.0%}, canopy height median {np.median(L['chm'][L['cover'] > 0.5]):.0f} m, "
@@ -266,7 +307,9 @@ def main():
             np.savez(cache, xyz=xyz, cls=cls, first=first)
         print("classes:", dict(zip(*np.unique(cls, return_counts=True))))
         p = to_local(xyz, lat0, lon0)
-        L, (p, cls, hag) = layers(p, cls, first, a.east, a.north, a.size_m, 1.0)
+        bf = building_raster(json.load(open(site / "buildings.json")), a.east, a.north, a.size_m, 1.0) \
+            if (site / "buildings.json").exists() else None
+        L, (p, cls, hag) = layers(p, cls, first, a.east, a.north, a.size_m, 1.0, bf)
         top, base = crown_base(p, hag, cls, a.east, a.north, a.size_m)
         np.savez_compressed(site / "fine1.npz", **L, veg_top=top, crown_base=base)
         np.savez_compressed(site / "fine_points.npz", xyz=p.astype(np.float32), hag=hag.astype(np.float32),

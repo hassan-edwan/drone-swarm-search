@@ -32,3 +32,27 @@ def test_always_linked_by_default():
 def test_radio_model_still_available():
     sc = FIELD_CONDITIONS["wild_hard_radio"](3)
     assert not sc.always_linked
+
+
+def test_under_canopy_check_happens_in_dense_forest():
+    """An alert over dense forest is checked from under the trees, which takes time."""
+    import numpy as np
+    from swarmsearch.field import env as fe
+    sc = dataclasses.replace(FIELD_CONDITIONS["wild_mix"](5), n_drones=2)
+    env = FieldEnv()
+    env.reset(seed=2, options={"scenario": sc})
+    a = env.agents[0]
+    env.w.map_canopy[:] = 0.9
+    x, y = (int(v) for v in env.pos[a])
+    env.use_view(a)
+    env._v.cand_t[y, x] = env.t
+    env.alt[a] = 0
+    env._maybe_go_under(a, 0, x, y)
+    assert env.mode[a] == "under" and env.mode_t[a] >= 1
+    steps = 0
+    while env.mode.get(a) == "under" and steps < 50:
+        env.step({b: fe.HOVER for b in env.agents})
+        steps += 1
+    assert steps >= 1 and env.mode[a] != "under"
+    assert env._v.cand_t[y, x] < 0
+    assert env.n_under == 1
