@@ -191,14 +191,8 @@ class Executor:
         known = {}
         nav = np.zeros(2)
         wind_err = np.zeros(3)
-        pts = []
-        tt = np.array([q[0] for q in tr])
-        for u in np.arange(0.0, tt[-1] + 1e-9, dt):
-            kk_ = min(int(np.searchsorted(tt, u, side="right")) - 1, len(tr) - 2)
-            a_, b_ = tr[kk_], tr[kk_ + 1]
-            f = (u - a_[0]) / max(b_[0] - a_[0], 1e-9)
-            x_, y_, z_ = (a_[1] + f * (b_[1] - a_[1]), a_[2] + f * (b_[2] - a_[2]), a_[3] + f * (b_[3] - a_[3]))
-            pts.append((x_, y_, z_ - self.M.ground(x_, y_), b_[4] if f > 0.5 else a_[4]))
+        self._dt = dt
+        pts = self._resample(tr, dt)
         self._climb_out = [q for q in pts if q[3] == "climb"]
         k = 0
         t = 0.0
@@ -332,6 +326,18 @@ class Executor:
         res.min_clear = clear
         return res
 
+    def _resample(self, tr, dt):
+        """A timed route (t, x, y, z above sea level, mode) as one point per step of dt: (x, y, height, mode)."""
+        pts = []
+        tt = np.array([q[0] for q in tr])
+        for u in np.arange(tt[0], tt[-1] + 1e-9, dt):
+            kk_ = min(int(np.searchsorted(tt, u, side="right")) - 1, len(tr) - 2)
+            a_, b_ = tr[kk_], tr[kk_ + 1]
+            f = (u - a_[0]) / max(b_[0] - a_[0], 1e-9)
+            x_, y_, z_ = (a_[1] + f * (b_[1] - a_[1]), a_[2] + f * (b_[2] - a_[2]), a_[3] + f * (b_[3] - a_[3]))
+            pts.append((x_, y_, z_ - self.M.ground(x_, y_), b_[4] if f > 0.5 else a_[4]))
+        return pts
+
     def _near_road(self, x, y, r):
         for P in self.roads:
             for a, b in zip(P[:-1], P[1:]):
@@ -371,7 +377,15 @@ class Executor:
         tr, info = P.under_check((x, y), target, agl)
         if tr is None:
             return None, str(info)
-        return [(q[1], q[2], q[3] - self.M.ground(q[1], q[2]), q[4]) for q in tr], ""
+        # the new route starts at cruise height above where the drone is: climb (or descend) to it first,
+        # then fly it at its own timing, one point per executor step
+        z_now = h + self.M.ground(x, y)
+        dz = tr[0][3] - z_now
+        t_up = abs(dz) / (f3.CLIMB_MPS if dz > 0 else f3.DESCEND_MPS)
+        timed = [(0.0, x, y, z_now, "climb")] + [(q[0] + t_up, q[1], q[2], q[3], q[4]) for q in tr]
+        if t_up > 0:
+            timed[1] = (t_up, timed[1][1], timed[1][2], timed[1][3], "climb")
+        return self._resample(timed, getattr(self, "_dt", 0.1)), ""
 
 
 LOW_SPEED = f3.LOW_MPS
