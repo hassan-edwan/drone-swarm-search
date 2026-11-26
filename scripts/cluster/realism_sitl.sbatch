@@ -1,10 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=swarm-sitl
 #SBATCH --cpus-per-task=128
-#SBATCH --time=04:00:00
+#SBATCH --time=08:00:00
 #SBATCH --output=logs/%x-%j.out
 # Missions on the hamlet site flown in ArduPilot SITL (one copter process per drone)
-# in each wind; tracking and clearance statistics in $REAL_RUN/sitl/summary.md.
+# in each wind, with GPS-only and with camera-based navigation under the canopy;
+# tracking and clearance statistics (from the true track) in $REAL_RUN/sitl/summary.md.
 # Re-submitting skips flights already done.
 source "$(dirname "$0")/common.sh" 2>/dev/null || source "$SLURM_SUBMIT_DIR/scripts/cluster/common.sh"
 source scripts/cluster/realism.env
