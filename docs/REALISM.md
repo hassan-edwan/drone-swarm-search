@@ -141,6 +141,38 @@ the rule).
   the canopy to a spot behind houses. It passes 5.0 m from a house, 2.9 m
   from trunks and 3.2 m below crowns, over 92 m.
 
+## What the changes do to the results
+
+`scripts/eval_realism.py`: the rule, 100 missions per row, the same missions
+in every row (wild_mix scenarios; on the real site the terrain, trees, trails
+and lakes are Catoctin's, cover leaf-on). All rows have drones always in
+contact. ± is one standard error.
+
+| World | Variant | Found | Mean time to first find (min) | Under-canopy checks / mission | Finds from them | False alarms / mission |
+|---|---|---|---|---|---|---|
+| generated wilderness | old sensing | 27% ± 4% | 18 | 0.0 | 0 | 22.6 |
+| generated wilderness | new sensing | 33% ± 5% | 19 | 0.0 | 0 | 19.3 |
+| generated wilderness | new sensing + under-canopy checks | 35% ± 5% | 21 | 0.2 | 3 | 18.6 |
+| real site (Catoctin, lidar) | old sensing | 17% ± 4% | 25 | 0.0 | 0 | 3.5 |
+| real site (Catoctin, lidar) | new sensing | 10% ± 3% | 20 | 0.0 | 0 | 3.4 |
+| real site (Catoctin, lidar) | new sensing + under-canopy checks | 11% ± 3% | 21 | 0.3 | 0 | 3.5 |
+
+- **Dense real forest is much harder.** At Catoctin (86% leaf-on cover) the
+  calibrated sensing finds 10% of people within the 90-minute mission, down
+  from 17% with the old model. Most of the generated wilderness is less
+  densely wooded, and there the new model's lower per-direction hiding
+  slightly outweighs the lower visibility (33% against 27%, within about one
+  and a half standard errors).
+- **Under-canopy checks are rarely triggered,** 0.2 to 0.3 per mission, and
+  produced 3 finds in 100 generated missions and none at Catoctin; the gain is
+  within noise. The reason is upstream: they only start from an alert, and
+  from above in dense forest alerts are rare. A real team would also search
+  under the canopy along likely routes (trails, drainages), or send ground
+  teams. That is the natural next change if under-canopy flight is to matter.
+- **Earlier results no longer apply.** The learned policies were trained
+  under the old sensing and radio; the rule needs no retraining, which is
+  why it is used here.
+
 ## 6. Autopilot in the loop (ArduPilot SITL): not done yet
 
 The next step is to fly these paths with ArduPilot's software-in-the-loop
