@@ -6,5 +6,5 @@
 | forward sensing, GPS only | 60 | 18% ± 5% | foliage 11 | 13% | 18% | +8 | 3.4 | 17 / 144 / 2.3 |
 | all-round sensing, GPS only | 60 | 8% ± 4% | foliage 5 | 33% | 20% | +31 | 66.8 | 67 / 362 / 3.1 |
 | forward sensing, camera nav, 10 m/s wind | 60 | 0% ± 0% |  | 3% | 27% | +9 | 0.1 | 18 / 141 / 2.2 |
-| forward sensing, camera nav, small drone | 60 | 0% ± 0% |  | 5% | 32% | +17 | 5.8 | 42 / 146 / 2.1 |
-| forward sensing, camera nav, winter snow | 60 | 0% ± 0% |  | 5% | 37% | +8 | 0.2 | 26 / 159 / 0.1 |
+| forward sensing, camera nav, small drone | 60 | 0% ± 0% |  | 5% | 32% | +20 | 5.8 | 43 / 148 / 2.3 |
+| forward sensing, camera nav, winter snow | 60 | 0% ± 0% |  | 5% | 37% | +9 | 0.2 | 26 / 161 / 0.1 |

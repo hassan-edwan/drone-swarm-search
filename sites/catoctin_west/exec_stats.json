@@ -54,14 +54,14 @@
    "p_collide": 0.0,
    "p_abort": 0.05,
    "p_reach": 0.31666666666666665,
-   "extra_s": 16.689116433970213
+   "extra_s": 20.296133977829733
   },
   "forward sensing, camera nav, winter snow": {
    "n": 60,
    "p_collide": 0.0,
    "p_abort": 0.05,
    "p_reach": 0.36666666666666664,
-   "extra_s": 8.288890952210707
+   "extra_s": 8.964329548701922
   }
  }
 }
