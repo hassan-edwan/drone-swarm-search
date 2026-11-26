@@ -19,6 +19,7 @@ Writes flight_limits.npz next to site.npz; the field environment loads it.
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -99,8 +100,36 @@ def main():
                 n = min(a.samples, len(spots))
                 under_p[i, j] = ok / n
                 under_s[i, j] = float(np.mean(secs)) if secs else -1.0
+    # emergency landing: share of each cell's 10 m patches that are open (no trees or buildings), gentle
+    # (under 15 degrees) and dry; and the distance in cells to the nearest cell with some
+    L10 = np.load(site / "lidar10.npz")
+    gy, gx = np.gradient(L10["dtm"], 10.0)
+    open10 = (L10["chm"] < 1.0) & (L10["bldg"] < 0.05) & (L10["water"] < 0.2) & \
+        (np.degrees(np.arctan(np.hypot(gx, gy))) < 15)
+    landing = np.zeros((g, g))
+    for i in range(g):
+        for j in range(g):
+            x, y = cxy(i, j)
+            ii0, jj0 = outer.ij(x - cell / 2 + 1, y + cell / 2 - 1)
+            ii1, jj1 = outer.ij(x + cell / 2 - 1, y - cell / 2 + 1)
+            landing[i, j] = open10[ii0:ii1 + 1, jj0:jj1 + 1].mean()
+    from scipy import ndimage
+    land_dist = ndimage.distance_transform_edt(landing < 0.05) * cell
+    # wind shaped by the terrain: speed multiplier at search height per cell, for 8 directions it comes from
+    from swarmsearch.windfield import WindField
+    wind_mult = np.zeros((8, g, g))
+    for d in range(8):
+        wf = WindField(L10["dtm"], L10["chm"], 10.0, 1.0, 45.0 * d)
+        u_open = math.log(50.0 / 0.03) / math.log(10.0 / 0.03)  # open flat ground, 50 m up, per 1 m/s at 10 m
+        for i in range(g):
+            for j in range(g):
+                x, y = cxy(i, j)
+                ii, jj = outer.ij(x, y)
+                wind_mult[d, i, j] = wf.speed(ii, jj, 50.0 + float(L10["chm"][ii, jj])) / u_open
     np.savez(site / "flight_limits.npz", min_level=min_level, top_m=top_cell, under_p=under_p, under_s=under_s,
-             season=a.season, drone=a.drone, cell_m=cell)
+             season=a.season, drone=a.drone, cell_m=cell, landing=landing, land_dist=land_dist, wind_mult=wind_mult)
+    print(f"emergency landing: {np.mean(landing > 0.05):.0%} of cells have an open spot; farthest {land_dist.max():.0f} m; "
+          f"wind at search height {np.percentile(wind_mult, 5):.2f}-{np.percentile(wind_mult, 95):.2f} x open ground")
     known = under_p >= 0
     print("highest obstacle per cell (m above ground): median %.0f, 90%% %.0f, max %.0f"
           % (np.median(top_cell), np.percentile(top_cell, 90), top_cell.max()))

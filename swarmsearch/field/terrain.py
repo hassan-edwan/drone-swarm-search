@@ -304,9 +304,23 @@ def make_world(rng, sc) -> World:
         if lim.exists():  # what the 3D obstacles mean for the grid (scripts/real_site/flight_limits.py)
             L = np.load(lim)
             w.extra.update(min_level=L["min_level"].astype(int), under_p=L["under_p"], under_s=L["under_s"])
+            for k in ("land_dist", "wind_mult"):
+                if k in L.files:
+                    w.extra[k] = L[k]
             nofly = L["min_level"] >= 3
             w.fly_block |= nofly
             w.map_fly_block |= nofly
+        ex = Path(sc.site).with_name("exec_stats.json")
+        if ex.exists():  # how under-canopy checks fare in the real world (surprise_eval.py)
+            import json
+            st = json.load(open(ex)).get("default")
+            if st:
+                w.extra["exec"] = st
+        leafoff = Path(sc.site).with_name("site_leafoff.npz")
+        if getattr(sc, "season", "summer") == "winter" and leafoff.exists():
+            c = np.load(leafoff)["canopy"]
+            w.canopy = c.copy()
+            w.map_canopy = c.copy()
         return w
     if sc.family == "wilderness" and sc.expand:
         big = wilderness(rng, EXPAND * fam.grid, fam.cell_m, sc.map_error, core=fam.grid)
@@ -315,7 +329,11 @@ def make_world(rng, sc) -> World:
         w.extra.update(big=big, origin=o)
         return w
     if sc.family == "wilderness":
-        return wilderness(rng, fam.grid, fam.cell_m, sc.map_error)
+        w = wilderness(rng, fam.grid, fam.cell_m, sc.map_error)
+        if getattr(sc, "season", "summer") == "winter":  # mixed forest leaf-off: about half the cover
+            w.canopy = w.canopy * 0.5
+            w.map_canopy = w.map_canopy * 0.5
+        return w
     if sc.family == "urban":
         return urban(rng, fam.grid, fam.cell_m, sc.collapse_frac, sc.map_error)
     if sc.family == "flood":

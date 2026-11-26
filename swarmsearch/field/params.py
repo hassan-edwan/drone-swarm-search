@@ -125,6 +125,9 @@ class FieldScenario:
     rtb_on_link_loss: bool = True  # return when out of contact (D6)
     fail_per_h: float = 0.01  # in-flight failure rate (D6)
     under_canopy: bool = True  # drones check alerts in dense forest from under the trees
+    season: str = "summer"  # "winter": leaf-off forest (better seen through from above)
+    ceiling_m: float = 1e9  # low cloud or fog: no search height within 10 m of the cloud base
+    bird_per_h: float = 0.01  # birds of prey: drone losses per flight hour (assumed: about 0.02 attacks/h, half evaded)
     canopy_model: str = "visibility"  # sensing under trees: "visibility" (gap fraction) or "linear" (earlier model)
     # Radio (C)
     always_linked: bool = True  # every drone always in contact with the base (cellular/satellite/mesh); False: radio model below
@@ -258,4 +261,8 @@ def sample_scenario(rng: np.random.Generator, family: str, **override) -> FieldS
                  p_report=float(u(0.0, 0.2)) if rng.random() < 0.4 else 0.0,
                  n_walkers=int(rng.integers(n_walk[0], n_walk[1] + 1) * (0.3 if light == "night" else 1.0)),
                  n_animals=int(rng.integers(n_anim[0], n_anim[1] + 1)))
+    # Added 2026-11-26, drawn last: season (a third of searches in the leaf-off months) and low cloud
+    # (15% of missions, cloud base 60-150 m above the ground). Shares assumed.
+    sc = replace(sc, season="winter" if rng.random() < 0.33 else "summer",
+                 ceiling_m=float(u(60.0, 150.0)) if rng.random() < 0.15 else 1e9)
     return replace(sc, **override) if override else sc

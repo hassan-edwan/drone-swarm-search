@@ -25,6 +25,7 @@ Per step:
 from __future__ import annotations
 
 import functools
+import math
 
 import numpy as np
 from gymnasium import spaces
@@ -185,6 +186,20 @@ class FieldEnv(GridSearchEnv):
         self.under_p = w.extra.get("under_p")
         self.under_s = w.extra.get("under_s")
         self.under_tried = set()
+        self.land_dist = w.extra.get("land_dist")
+        self.exec_stats = w.extra.get("exec")
+        wm = w.extra.get("wind_mult")
+        self._wind_mult_all = wm
+        # low cloud: no search height within 10 m of the cloud base; cells needing more are no-fly
+        ceil = getattr(sc, "ceiling_m", 1e9)
+        lv_ok = [k for k, h in enumerate(fam.alt_m) if h <= ceil - 10.0]
+        self.max_level = max(lv_ok) if lv_ok else 0
+        if self.max_level < 2:
+            over = self.min_level > self.max_level
+            w.fly_block |= over
+            w.map_fly_block |= over
+            self.min_level = np.where(over, 3, self.min_level)
+        self.n_emergency = self.n_bird = self.n_under_crash = 0
         self._M = _pool_matrix(g)
         self.alt_m_levels = fam.alt_m
         self.foot_r = fam.foot_r
@@ -447,9 +462,19 @@ class FieldEnv(GridSearchEnv):
                 if (self._flyable(nx + dx, ny + dy) and (nx + dx, ny + dy) not in occupied
                         and self._high_enough(nx + dx, ny + dy, lv)):
                     m[SPRINT0 + k] = 1
-        m[CLIMB] = self.alt_tgt[a] < 2
+        m[CLIMB] = self.alt_tgt[a] < min(2, getattr(self, "max_level", 2))
         m[DESCEND] = self.alt_tgt[a] > max(0, int(self.min_level[y, x]))
         return m
+
+    def _wind_here(self, a) -> float:
+        """Mean wind at the drone's search height in its cell: the scenario's wind shaped by the terrain."""
+        sc = self.scenario
+        if self._wind_mult_all is None:
+            return sc.wind_mps
+        dx, dy = (float(v) for v in self.wind_dir)  # the way the wind blows (grid: +y is south)
+        frm = (math.degrees(math.atan2(dx, -dy)) + 180.0) % 360.0
+        x, y = self.pos[a]
+        return sc.wind_mps * float(self._wind_mult_all[int(round(frm / 45.0)) % 8, y, x])
 
     def _high_enough(self, x, y, level) -> bool:
         g = self.grid_size
@@ -475,7 +500,7 @@ class FieldEnv(GridSearchEnv):
             act = self._auto_action(a) if self.mode[a] is not None else int(actions.get(a, HOVER))
             if (act < 8 or act >= SPRINT0) and self._needs_climb(a, act):
                 # trees, wires or a tower ahead need a higher search height: climb first, then go
-                self.alt_tgt[a] = min(2, max(self.alt_tgt[a], self.alt[a] + 1))
+                self.alt_tgt[a] = min(2, self.max_level, max(self.alt_tgt[a], self.alt[a] + 1))
                 act = HOVER
             elif not self.action_mask(a)[act] and self.mode[a] is None:
                 act = HOVER
@@ -609,12 +634,12 @@ class FieldEnv(GridSearchEnv):
         for a in live:
             if self.mode[a] is None:
                 act = int(actions.get(a, HOVER))
-                if act == CLIMB and self.alt_tgt[a] < 2:
+                if act == CLIMB and self.alt_tgt[a] < min(2, self.max_level):
                     self.alt_tgt[a] += 1
                 elif act == DESCEND and self.alt_tgt[a] > 0:
                     self.alt_tgt[a] -= 1
             cx_, cy_ = self.pos[a]
-            self.alt_tgt[a] = max(self.alt_tgt[a], min(2, int(self.min_level[cy_, cx_])))
+            self.alt_tgt[a] = min(max(self.alt_tgt[a], min(2, int(self.min_level[cy_, cx_]))), self.max_level)
             goal = fam.alt_m[self.alt_tgt[a]]
             rate = (CLIMB_MPS if goal > self.alt_now[a] else DESCEND_MPS) * fam.step_s
             new_h = self.alt_now[a] + float(np.clip(goal - self.alt_now[a], -rate, rate))
@@ -636,11 +661,21 @@ class FieldEnv(GridSearchEnv):
             act = self.last_act[a]
             power = 1.5 if act >= SPRINT0 else 1.0
             power += 0.3 if abs(self.alt_now[a] - fam.alt_m[self.alt_tgt[a]]) > 1 else 0.0
-            power *= (1 + 0.02 * sc.wind_mps) * (1.2 if sc.air_c < 0 else 1.0) * (1.1 if self.rain_on else 1.0)
+            power *= (1 + 0.02 * self._wind_here(a)) * (1.2 if sc.air_c < 0 else 1.0) * (1.1 if self.rain_on else 1.0)
             self.battery[a] -= power * fam.step_s / (sc.endurance_min * 60.0)
-            if self.battery[a] <= 0 or rng.random() < sc.fail_per_h * fam.step_s / 3600.0:
-                self.alive[a] = False  # battery exhausted or in-flight failure (D6)
-                self.n_crash += 1
+            fail = rng.random() < sc.fail_per_h * fam.step_s / 3600.0
+            bird = rng.random() < getattr(sc, "bird_per_h", 0.0) * fam.step_s / 3600.0
+            if self.battery[a] <= 0 or fail or bird:
+                self.alive[a] = False  # battery exhausted, in-flight failure (D6) or a bird of prey
+                self.n_bird += int(bird and not fail)
+                cx_, cy_ = self.pos[a]
+                # with a failure (not an empty battery) it can still glide down under control for ~150 m:
+                # an open spot within reach means an emergency landing, else it comes down in the trees
+                if (self.battery[a] > 0 and self.land_dist is not None
+                        and float(self.land_dist[cy_, cx_]) <= 150.0):
+                    self.n_emergency += 1
+                else:
+                    self.n_crash += 1
                 rewards[a] -= CRASH_PENALTY
         # collisions where drones really are, at the same height
         up = [a for a in self.agents if self.alive[a] and self.mode[a] != "landed"]
@@ -819,7 +854,7 @@ class FieldEnv(GridSearchEnv):
             if any((c[0], c[1]) in near for c in (nxt, mid)):
                 self.n_near += 1
             nxt = tp.copy()
-        slip = rl.SLIP_PER_MPS * sc.wind_mps * (10.0 / fam.cell_m)
+        slip = rl.SLIP_PER_MPS * self._wind_here(a) * (10.0 / fam.cell_m)
         if rng.random() < slip:
             dd = self.wind_dir if rng.random() >= rl.GUST else np.array(rl.MOVES8[rng.integers(8)])
             if ok(nxt + dd):
@@ -1062,6 +1097,8 @@ class FieldEnv(GridSearchEnv):
         secs = h / DESCEND_MPS + UNDER_RUN_M / UNDER_MPS + h / CLIMB_MPS
         if self.under_s is not None and self.under_s[ey, ex] > 0:
             secs = float(self.under_s[ey, ex])  # the planned trip through the real obstacles
+        if self.exec_stats:  # stopping, re-planning and holding in the real world take longer
+            secs += max(0.0, float(self.exec_stats.get("extra_s", 0.0)))
         self.mode[a] = "under"
         self.mode_t[a] = max(1, int(np.ceil(secs / fam.step_s)))
         self.mode_target[a] = (int(ex), int(ey))
@@ -1077,6 +1114,16 @@ class FieldEnv(GridSearchEnv):
         if rng.random() >= p_close:  # could not get within sight of the spot under the trees
             self.n_under_blocked += 1
             return 0.0
+        if self.exec_stats:  # what the map did not show: collided, or saw it and turned back
+            u = rng.random()
+            if u < self.exec_stats.get("p_collide", 0.0):
+                self.alive[a] = False
+                self.n_crash += 1
+                self.n_under_crash += 1
+                return 0.0
+            if u < self.exec_stats.get("p_collide", 0.0) + self.exec_stats.get("p_abort", 0.0):
+                self.n_under_blocked += 1
+                return 0.0
         ppl = self.people
         here = np.flatnonzero(~self.found & ~ppl.outside & (ppl.pos[:, 0] == tx) & (ppl.pos[:, 1] == ty))
         seen_i = None
@@ -1501,6 +1548,9 @@ class FieldEnv(GridSearchEnv):
             "under_checks": self.n_under,
             "under_finds": self.n_under_finds,
             "under_blocked": self.n_under_blocked,
+            "under_crashes": self.n_under_crash,
+            "emergency_landings": self.n_emergency,
+            "bird_losses": self.n_bird,
             "coverage": float(self.visited[self.w.walk].mean()),
             "repeat_frac": self.n_repeats / max(1, self.n_visits),
             "collisions": self.n_collisions,

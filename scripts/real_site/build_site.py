@@ -65,6 +65,13 @@ def main():
         cmd += ["--cell-out", str(a.cell_out)]
     print(f"elevation and tree cover from the {src}")
     subprocess.run(cmd, check=True)
+    if (site / "lidar10.npz").exists() and a.season == "leaf-on":
+        # the same site with leaf-off cover, for winter missions (field env loads it by itself)
+        np.save(site / "in_canopy_leafoff.npy", to_grid(np.load(site / "lidar10.npz")["cover"], n))
+        cmd2 = list(cmd)
+        cmd2[cmd2.index("--canopy") + 1] = str(site / "in_canopy_leafoff.npy")
+        cmd2[cmd2.index("--out") + 1] = str(site / "site_leafoff.npz")
+        subprocess.run(cmd2, check=True)
 
 
 if __name__ == "__main__":

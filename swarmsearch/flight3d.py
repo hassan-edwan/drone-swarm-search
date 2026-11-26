@@ -493,3 +493,54 @@ def clearance(site: Site3D, traj, mode_filter=None, drone="sar"):
 
 def save_traj(path, trajs: dict, info: dict):
     Path(path).write_text(json.dumps(dict(trajs={a: [list(p) for p in tr] for a, tr in trajs.items()}, info=info)))
+
+
+class VoxPlanner(Planner):
+    """The same planner on a 3D voxel map (swarmsearch.world3d): free space under the canopy is
+    where nothing occupies the drone's height band (with its size and margin around it), and a
+    gap is a column with nothing above that band at all."""
+
+    def __init__(self, W, outer: CoarseTerrain | None = None, drone: str = "sar", known_extra=None):
+        from . import world3d as w3
+        self.s = W
+        self.outer = outer
+        self.drone = drone
+        dr = DRONES[drone]
+        self._half_h = dr["height"] / 2
+        occ = W.occ if known_extra is None else (W.occ | known_extra)
+        top = np.where(occ.any(axis=2), w3.NZ - np.argmax(occ[:, :, ::-1] != 0, axis=2), 0).astype(float)
+        self.top = ndimage.maximum_filter(top, size=int(2 * (SIDE_M + dr["span"] / 2) + 1))
+        lo = max(0, int(math.floor(LOW_M - dr["height"] / 2 - SAFETY_M)))
+        hi = int(math.ceil(LOW_M + dr["height"] / 2 + SAFETY_M))
+        band = occ[:, :, lo:hi + 1].any(axis=2)
+        free1 = ndimage.distance_transform_edt(~band) > dr["span"] / 2 + SAFETY_M
+        above = occ[:, :, lo:].any(axis=2)
+        r = dr["span"] / 2 + 2.0 + (1.0 if W.season == "leaf-on" else 0.0)
+        gap1 = ndimage.distance_transform_edt(~above) > r
+        n2 = W.n // STEP
+        cut = n2 * STEP
+        self.free = free1[:cut, :cut].reshape(n2, STEP, n2, STEP).all((1, 3))
+        self.gap = gap1[:cut, :cut].reshape(n2, STEP, n2, STEP).all((1, 3)) & self.free
+        self.n2 = n2
+        lab, nl = ndimage.label(self.free, structure=np.ones((3, 3)))
+        sizes = np.bincount(lab.ravel())
+        self.big = (lab > 0) & (sizes[lab] >= 100) & np.isin(lab, np.unique(lab[self.gap]))
+
+
+def clearance_world(W, traj, drone="sar", radius=6.0):
+    """Edge-to-edge distance from the drone (a sphere of half its span) to the nearest occupied voxel of
+    each kind, along a trajectory, in a 3D world (map or real). Negative: touching or inside."""
+    from . import world3d as w3
+    r_d = DRONES[drone]["span"] / 2
+    out = {nm: np.inf for nm in w3.KIND_NAMES.values()}
+    out["ground"] = np.inf
+    for t, x, y, z, mode in traj:
+        if not W.inside(x, y):
+            continue
+        h = z - W.ground(x, y)
+        out["ground"] = min(out["ground"], h - DRONES[drone]["height"] / 2)
+        for kind, d in W.kinds_near(x, y, h, radius):
+            for kb, nm in w3.KIND_NAMES.items():
+                if kind & kb:
+                    out[nm] = min(out[nm], float(d) - r_d)
+    return out

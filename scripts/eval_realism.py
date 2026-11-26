@@ -55,7 +55,8 @@ def one(job):
     return dict(world=world, variant=variant, seed=seed, found=float(env.found.mean()),
                 find_min=(ft * env.fam.step_s / 60.0) if ft is not None else None,
                 under=int(env.n_under), under_finds=int(env.n_under_finds),
-                false_alarms=int(env.n_false_alarms))
+                false_alarms=int(env.n_false_alarms), crashes=int(env.n_crash), emergency=int(env.n_emergency),
+                birds=int(env.n_bird), under_crash=int(env.n_under_crash))
 
 
 def main():
@@ -71,7 +72,8 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     json.dump(rows, open(out / "results.json", "w"))
     lines = ["| World | Variant | Found | Mean time to first find (min) | Under-canopy checks / mission | "
-             "Finds from them | False alarms / mission |", "|---|---|---|---|---|---|---|"]
+             "Finds from them | False alarms / mission | Drones lost: crashed / emergency landing / bird, per 100 "
+             "missions |", "|---|---|---|---|---|---|---|---|"]
     for w in WORLDS:
         for v in VARIANTS:
             r = [x for x in rows if x["world"] == w and x["variant"] == v]
@@ -80,7 +82,9 @@ def main():
             se = f.std(ddof=1) / np.sqrt(len(f))
             lines.append(f"| {w} | {v} | {f.mean():.0%} ± {se:.0%} | {np.mean(ft):.0f} | "
                          f"{np.mean([x['under'] for x in r]):.1f} | {sum(x['under_finds'] for x in r)} | "
-                         f"{np.mean([x['false_alarms'] for x in r]):.1f} |")
+                         f"{np.mean([x['false_alarms'] for x in r]):.1f} | "
+                         f"{100 * np.mean([x['crashes'] for x in r]):.0f} / {100 * np.mean([x['emergency'] for x in r]):.0f} / "
+                         f"{100 * np.mean([x['birds'] for x in r]):.0f} |")
     txt = "\n".join(lines)
     (out / "results.md").write_text(txt + "\n")
     print(txt)
