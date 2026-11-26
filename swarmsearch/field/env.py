@@ -322,7 +322,7 @@ class FieldEnv(GridSearchEnv):
         the base (range, and terrain/buildings for the shorter blocked range).
         Planners stay inside it when drones return on link loss (D6)."""
         g, fam = w.g, sc.fam
-        if not sc.rtb_on_link_loss:
+        if sc.always_linked or not sc.rtb_on_link_loss:
             return np.ones((g, g), dtype=bool)
         rng_c = sc.comm_range_m / fam.cell_m
         base_h = w.elev[w.base[1], w.base[0]] + (100.0 if sc.tether_relay else rl.BASE_ALT_M)
@@ -804,7 +804,9 @@ class FieldEnv(GridSearchEnv):
                 pending[id(it)] = it
             v.outbox = []
         used, new = set(), {}
-        for grp in rl.groups(nodes, w.surface, self.rng, sc.comm_range_m / fam.cell_m, sc.comm_loss):
+        grps = ([list(nodes)] if sc.always_linked
+                else rl.groups(nodes, w.surface, self.rng, sc.comm_range_m / fam.cell_m, sc.comm_loss))
+        for grp in grps:
             if "base" in grp:
                 grp = grp + landed
             objs = list({id(self.views[n]): self.views[n] for n in grp}.values())

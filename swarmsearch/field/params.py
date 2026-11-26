@@ -125,6 +125,7 @@ class FieldScenario:
     rtb_on_link_loss: bool = True  # return when out of contact (D6)
     fail_per_h: float = 0.01  # in-flight failure rate (D6)
     # Radio (C)
+    always_linked: bool = True  # every drone always in contact with the base (cellular/satellite/mesh); False: radio model below
     comm_range_m: float = 800.0  # line of sight; a quarter of that when blocked (C1)
     comm_loss: float = 0.05
     tether_relay: bool = False  # relay drone on a tether above the base (C1)

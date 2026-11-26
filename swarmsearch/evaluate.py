@@ -154,7 +154,7 @@ FIELD_CONDITIONS = {
     "wild_hard_outside": _field("wilderness", force="outside"),
     "wild_hard_weak_sensor": _field("wilderness", sensor_scale=0.4),
     "wild_hard_late_start": _field("wilderness", hours_lost=12.0),
-    "wild_hard_radio": _field("wilderness", comm_range_m=300.0, rtb_on_link_loss=True),
+    "wild_hard_radio": _field("wilderness", comm_range_m=300.0, rtb_on_link_loss=True, always_linked=False),
     "wild_hard_off_model": _field("wilderness", force="off_model"),
 }
 # M8 mission suite for Phase 2 (docs/MISSIONS.md): one effect turned up at a
@@ -198,7 +198,7 @@ FIELD_MISSIONS = {
     "urban_aftershock": _field("urban", aftershock=1.0),
     "urban_smoke": _field("urban", smoke=1.0),
     "urban_night": _field("urban", light="night", hour=2.0),
-    "urban_radio": _field("urban", comm_range_m=200.0, tether_relay=False),
+    "urban_radio": _field("urban", comm_range_m=200.0, tether_relay=False, always_linked=False),
     # Flood (held out of training)
     "flood_rising_heldout": _field("flood", water_rise=2.0),
     "flood_night_heldout": _field("flood", light="night", hour=2.0),
