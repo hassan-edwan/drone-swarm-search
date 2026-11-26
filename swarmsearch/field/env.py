@@ -562,7 +562,9 @@ class FieldEnv(GridSearchEnv):
         D = self._field_to(self.w.base)
         x, y = self.pos[a]
         steps = D[y, x] if np.isfinite(D[y, x]) else 2 * self.grid_size
-        per = fam.step_s / (sc.endurance_min * 60.0) * (1 + 0.02 * sc.wind_mps)
+        # the return reserve uses the wind the drone measures where it is (terrain-shaped), with a margin
+        wind = max(sc.wind_mps, 1.25 * self._wind_here(a)) if self._wind_mult_all is not None else sc.wind_mps
+        per = fam.step_s / (sc.endurance_min * 60.0) * (1 + 0.02 * wind)
         return float(steps * per * 1.5 + 0.08)
 
     def _update_modes(self, a):

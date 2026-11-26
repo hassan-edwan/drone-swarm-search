@@ -338,6 +338,7 @@ realism.env):
 |---|---|---|
 | realism_eval | the comparison table above with 500 missions per row | about 1–2 h |
 | realism_sitl | 100 hamlet missions × winds 0, 5, 10 m/s × GPS-only and camera navigation under the canopy, in ArduPilot, each with a random under-canopy check | about 2–4 h |
+| realism_surprises | map vs real world: 16 real-world draws × 100 under-canopy checks × 8 variants (sensing, navigation, wind, drone, snow) | about 1–2 h |
 | realism_targets | retrain the target-choosing policy under the new defaults (400 iterations), then evaluate it against the rule on 5 conditions incl. both real sites | about 8–12 h |
 
 On a login node, once (after `setup.sh`):
@@ -348,6 +349,141 @@ On a login node, once (after `setup.sh`):
 Results: `runs/realism/eval/results.md`, `runs/realism/sitl/summary.md`,
 `runs/realism/targets/results/results_targets.md`. Re-submitting a job skips
 or resumes finished work.
+
+## 8. The map is not the world: surprises and onboard sensing
+
+So far the drones knew the map exactly, and everything real was on the
+map. Real flights meet what the map lacks. `swarmsearch/world3d.py` builds
+two 3D worlds at 1 m.
+
+**The map** (what the planner knows):
+
+- **Trees:** foliage from the lidar points themselves, layered rather than
+  filled solid. A 1 m slice is occupied where the laser hit within
+  3 × 3 m; gaps under 4 m inside a column are closed; in summer the
+  foliage is grown out 1 m.
+- **Tree shapes:** trees found by watershed segmentation of the crown
+  surface, each with a trunk sized from its height (DBH ≈ 2 × (height −
+  1.3 m) cm, a generic hardwood fit) up to its crown bottom.
+- **Buildings:** with their real roof surface from the lidar, so pitched
+  roofs, not boxes.
+- **Power lines, pole by pole:** 10 m poles every 45 m on one side of each
+  road. Three conductors at 9.5, 8 and 6 m (the lowest is telephone/cable),
+  sagging 1 m mid-span. A service wire from the nearest pole to each house.
+- **High-voltage lines:** 30 m pylons every 300 m, conductors at 24 m
+  sagging 6 m, plus an earth wire.
+- **Registered towers:** a mast with guy wires to three anchors.
+
+**The real world** (`make_truth`) adds what the map does not know. Rates
+are assumptions where no data exists:
+
+- **Growth:** five years since the 2021 lidar, about 0.3 m a year at crown
+  tops and edges.
+- **Misregistration:** each footprint off by about 1 m; each trunk 0.7 m
+  from the crown peak it was placed under.
+- **Wires:** local lines on the other side of the road on half the roads,
+  unmapped spans across fields, and wires to sheds.
+- **Small structures:** sheds and carports at 35% of houses, flagpoles at 5%.
+- **Forest clutter at flying height:** dead branches (25 per ha) and
+  saplings (40 per ha).
+- **Storm damage:** felled trees leaning on their neighbours (0.3 per ha).
+- **New buildings** since the footprints were made.
+- **Winter snow:** branches weighed down by 1 m.
+
+`swarmsearch/fly_exec.py` plans each under-canopy check on the map and flies
+it in the real world. Every 0.1 s:
+
+- **Navigation.** The drone flies its own estimate: GPS (degraded under the
+  crowns, as in section 6) or camera-based navigation (about 1% drift).
+  Wind adds gusty drift from the wind field (section 9).
+- **Sensing.** A forward depth camera (90° wide), or all-round sensing.
+  Trunks, buildings, poles and structures are seen to 15 m in the open and
+  8 m in the dark under the crowns. Foliage and branches are seen to 6 m
+  with a 0.6 chance per frame. Wires only within 4 m (2.5 m under the
+  crowns) with a 0.25 chance per frame, since depth cameras barely see thin
+  wires.
+- **Avoiding.**
+  - If what it has seen blocks the route within stopping distance plus 3 m,
+    it stops and re-plans: around the obstacle under the crowns, through
+    another gap, or it gives up and retraces its own track out.
+  - A local safety layer, relative to the drone and so unaffected by GPS
+    jumps, never lets it move towards something it has seen; stuck for
+    15 s, it turns back.
+- **Collisions.** If its body touches anything real, it has collided.
+- **Also:** vehicles where a low route crosses a road, and birds of prey
+  above the trees (rates assumed).
+
+Results (`scripts/real_site/surprise_eval.py`): 2 real-world draws × 30
+spots under the trees on the hamlet site, the same spots for every variant,
+5 m/s wind, SAR quad, summer unless noted.
+
+| Variant | Checks | Collided | With what | Turned back | Reached the spot | Extra time (s) | Re-plans / check | Seen: solid / foliage / wire |
+|---|---|---|---|---|---|---|---|---|
+| no sensing, camera nav | 60 | 8% ± 4% | vehicle 3, foliage 2 | 0% | 27% | +8 | 0.0 | 0 / 0 / 0.0 |
+| forward sensing, camera nav | 60 | 0% ± 0% |  | 3% | 28% | +8 | 0.1 | 15 / 116 / 2.1 |
+| all-round sensing, camera nav | 60 | 0% ± 0% |  | 2% | 28% | +12 | 2.9 | 20 / 266 / 2.9 |
+| forward sensing, GPS only | 60 | 18% ± 5% | foliage 11 | 13% | 18% | +8 | 3.4 | 17 / 144 / 2.3 |
+| all-round sensing, GPS only | 60 | 8% ± 4% | foliage 5 | 33% | 20% | +31 | 66.8 | 67 / 362 / 3.1 |
+| forward sensing, camera nav, 10 m/s wind | 60 | 0% ± 0% |  | 3% | 27% | +9 | 0.1 | 18 / 141 / 2.2 |
+| forward sensing, camera nav, small drone | 60 | 0% ± 0% |  | 5% | 32% | +17 | 5.8 | 42 / 146 / 2.1 |
+| forward sensing, camera nav, winter snow | 60 | 0% ± 0% |  | 5% | 37% | +8 | 0.2 | 26 / 159 / 0.1 |
+
+- **Without onboard sensing, 8% of checks collide.** The causes are
+  vehicles at road crossings and foliage the map did not have.
+- **With a forward depth camera and camera navigation: no collisions in 60
+  checks** (under about 5% at 95% confidence). About 3% turn back. Wind,
+  drone size and winter snow do not change this.
+- **GPS-only navigation under the crowns is not safe even with sensing:**
+  18% collide with a forward camera, 8% with all-round sensing (which
+  turns back a third of the time instead). The position error moves the
+  drone sideways into foliage it is not looking at. This repeats the
+  ArduPilot result in section 6.
+- **Wires are the hardest to see:** about 2 wire detections per check, at
+  most 4 m away.
+- `results/figures/surprise_example.png` shows one case. The planned
+  descent gap is crossed by a real service wire, because the line is on
+  the other side of the road from the map's. The drone sees it 3.8 m away
+  on the way down, stops, climbs, and goes through another gap to reach
+  the spot.
+
+**Fed back.** The default variant (forward camera, camera navigation) sets,
+in `exec_stats.json`, each under-canopy check's chance of colliding or
+turning back and its extra time in the field simulator. On the cluster,
+`realism_surprises` runs 16 world draws × 100 spots.
+
+## 9. Weather, season and the unexpected
+
+- **Wind shaped by the terrain** (`swarmsearch/windfield.py`):
+  - over hills: speed-up at crests and on upwind slopes, slower and gustier
+    in the lee (from the ground's height above the upwind terrain within
+    500 m, the usual hill speed-up rule of thumb);
+  - with height: a log profile over each surface, all matching at a 100 m
+    blending height (over forest: displaced and rougher), decaying under
+    the canopy to about 1 m/s;
+  - gusts: turbulence intensity 0.2, 0.35 in the lee.
+  - In the field simulator the wind at each search cell (a multiplier per
+    cell for 8 directions, in `flight_limits.npz`) drives battery use and
+    drift. The return-home reserve uses the wind measured where the drone
+    is, with a 25% margin. Before that change, drones on the park's ridges
+    ran out of battery on the way home.
+  - Hamlet site: 0.7–1.3 × the open-ground wind at search height; park:
+    0.6–1.5 ×.
+- **Season.** A third of missions are in the leaf-off months
+  (`season="winter"`). Real sites then use the leaf-off lidar cover (park
+  70% instead of 86%) and generated worlds half their cover, so people are
+  easier to see from above.
+- **Low cloud or fog.** 15% of missions have a cloud base 60–150 m up; no
+  search height within 10 m of it, and cells needing more become no-fly.
+- **Birds of prey:** 0.01 drone losses per flight hour (assumed: about
+  0.02 attacks per hour, half evaded).
+- **Emergency landing.** An in-flight failure (not an empty battery) leaves
+  about 150 m of controlled descent. With an open spot in reach (open
+  ground, under 15°, dry; `flight_limits.npz`), it is an emergency landing;
+  otherwise the drone comes down in the trees. They are counted
+  separately. On the hamlet site 34% of search cells have an open spot and
+  the farthest point is 780 m from one; on the park site, 36% and 2 km.
+- **Other aircraft.** A helicopter working the search closes airspace for
+  a while: the simulator's temporary no-fly zones (`p_tfr`, D8) cover it.
 
 ## Limits
 
