@@ -22,6 +22,8 @@ from __future__ import annotations
 import heapq
 from dataclasses import dataclass, field
 
+from pathlib import Path
+
 import numpy as np
 
 from ..obstacles import make_obstacles
@@ -296,8 +298,16 @@ def make_world(rng, sc) -> World:
         d = np.load(sc.site)
         if abs(float(d["cell_m"]) - fam.cell_m) > 1e-6:
             raise ValueError(f"site cell size {float(d['cell_m'])} m: set FieldScenario(cell_m={float(d['cell_m'])})")
-        return world_from_arrays(d["elev"], d["canopy"], d["trail"], d["water"], float(d["cell_m"]),
-                                 tuple(int(v) for v in d["base"]), tuple(int(v) for v in d["ipp"]))
+        w = world_from_arrays(d["elev"], d["canopy"], d["trail"], d["water"], float(d["cell_m"]),
+                              tuple(int(v) for v in d["base"]), tuple(int(v) for v in d["ipp"]))
+        lim = Path(sc.site).with_name("flight_limits.npz")
+        if lim.exists():  # what the 3D obstacles mean for the grid (scripts/real_site/flight_limits.py)
+            L = np.load(lim)
+            w.extra.update(min_level=L["min_level"].astype(int), under_p=L["under_p"], under_s=L["under_s"])
+            nofly = L["min_level"] >= 3
+            w.fly_block |= nofly
+            w.map_fly_block |= nofly
+        return w
     if sc.family == "wilderness" and sc.expand:
         big = wilderness(rng, EXPAND * fam.grid, fam.cell_m, sc.map_error, core=fam.grid)
         o = tuple(int(np.clip(c - fam.grid // 2, 0, big.g - fam.grid)) for c in big.base)

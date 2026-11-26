@@ -284,6 +284,56 @@ def map_panel(photo_full, site_size, s3, buildings, w):
     return img, px
 
 
+WIRE_STYLE = {"transmission": ((25.0,), (20, 20, 20, 240), 3), "distribution": ((9.0,), (25, 25, 25, 230), 2),
+              "service": ((5.5,), (35, 35, 35, 220), 2)}
+
+
+def project_wires(H, s3, z0, render_out, step=3.0):
+    """Wires as lines at the middle of their band (assumed heights; see fetch_hazards.py), towers as
+    masts: projected once per (static) camera, with a visibility flag from the depth buffer."""
+    rgb, depth, M = render_out
+    hh, ww = depth.shape
+    out = []
+
+    def add_line(P, h, col, wdt):
+        P = np.asarray(P, float)
+        pts = []
+        for a_, b_ in zip(P[:-1], P[1:]):
+            n = max(2, int(np.hypot(*(b_ - a_)) / step) + 1)
+            for u in np.linspace(0, 1, n):
+                x, y = a_ + u * (b_ - a_)
+                if not s3.inside(x, y):
+                    pts.append(None)
+                    continue
+                pts.append((x, y, s3.ground(x, y) - z0 + h))
+        seg = []
+        for q in pts + [None]:
+            if q is None:
+                if len(seg) > 1:
+                    pr, ok = project(M, np.array(seg), ww, hh)
+                    vis = []
+                    for (u_, v_, zz), o in zip(pr, ok):
+                        inside = o and 0 <= u_ < ww and 0 <= v_ < hh
+                        vis.append((u_, v_, bool(inside and zz <= depth[int(v_), int(u_)] + 2e-5)))
+                    out.append((vis, col, wdt))
+                seg = []
+            else:
+                seg.append(q)
+
+    for kind in ("transmission", "distribution", "service"):
+        (h,), col, wdt = WIRE_STYLE[kind]
+        lines = H.get(kind, [])
+        for ln in lines:
+            add_line(ln["pts"] if isinstance(ln, dict) else ln, h, col, wdt)
+    for t in H.get("towers", []):
+        if s3.inside(t["x"], t["y"]):
+            g = s3.ground(t["x"], t["y"]) - z0
+            add_line([(t["x"], t["y"]), (t["x"] + 0.01, t["y"])], 0.0, (200, 40, 40, 255), 3)
+            pr, ok = project(M, np.array([[t["x"], t["y"], g], [t["x"], t["y"], g + t["h"]]]), ww, hh)
+            out.append(([(pr[0][0], pr[0][1], True), (pr[1][0], pr[1][1], True)], (200, 40, 40, 255), 3))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--site", default="sites/catoctin_west")
@@ -299,7 +349,9 @@ def main():
     site = Path(a.site)
     D = json.load(open(site / f"flight_seed{a.seed}.json"))
     info = D["info"]
-    s3 = f3.Site3D.load(a.fine_from, shift=tuple(a.shift))
+    hzp = site / "hazards.json"
+    s3 = f3.Site3D.load(a.fine_from, shift=tuple(a.shift), hazards=hzp, season=info.get("season", "leaf-on"))
+    HZ = json.load(open(hzp)) if hzp.exists() else {}
     meta = json.load(open(site / "meta.json"))
     z0 = float(s3.dtm.min())
     area = float(s3.n)
@@ -356,8 +408,10 @@ def main():
         gz = s3.ground(mx, my) - z0
         shots.append(("test", [mx - 75, my - 100, gz + 60], [mx, my, gz + 4], 55))
     renders = {}
+    wires = {}
     for name, eye, tgt, fov in shots:
         renders[name] = render(p, eye, tgt, fov=fov)
+        wires[name] = project_wires(HZ, s3, z0, renders[name])
         print(f"rendered {name} view", flush=True)
     # side cut along the under-canopy leg of the check
     def make_section(tr, title, margin=20.0):
@@ -407,6 +461,11 @@ def main():
         view = Image.fromarray(rgb).convert("RGBA")
         ov = Image.new("RGBA", view.size, (0, 0, 0, 0))
         dr = ImageDraw.Draw(ov)
+        # wires and towers (hidden where trees or buildings are in front)
+        for pts, col, wdt in wires[shot]:
+            for i in range(1, len(pts)):
+                if pts[i][2] and pts[i - 1][2]:
+                    dr.line([pts[i - 1][:2], pts[i][:2]], fill=col, width=wdt)
         # the person (true position)
         for (px_, py_) in info["people"]:
             g = s3.ground(px_, py_) - z0
@@ -465,8 +524,9 @@ def main():
                 "close": f"Mission time {t:4.0f} s  ·  D1 checks an alert under the trees",
                 "test": "Planner test (not from the mission): under the trees, past a house"}[shot]
         dc.text((16, 8), head, font=font(24, True), fill=(255, 255, 255) if shot != "test" else (255, 230, 150))
-        dc.text((16, 42), f"{info['n_drones']} drones, {info['policy']}  ·  every tree and building from USGS lidar and "
-                "Microsoft footprints  ·  drone markers not to scale", font=font(15), fill=(200, 200, 200))
+        dc.text((16, 42), f"{info['n_drones']} drones, {info['policy']}  ·  trees and buildings from lidar and footprints"
+                "  ·  black lines: power lines (assumed: roads, houses)",
+                font=font(15), fill=(200, 200, 200))
         # status lines
         y0 = 80
         for k, d in (enumerate(names) if not in_test else [(0, "test")]):

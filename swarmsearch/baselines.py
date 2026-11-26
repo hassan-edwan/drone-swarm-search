@@ -306,6 +306,10 @@ class BeliefGreedy:
         D = self._field(env, (x, y))
         S = np.stack([np.where(taken, -1.0, V[k] / (1.0 + D + abs(k - env.alt[a]))) for k in range(cam.N_ALT)])
         S[env.alt[a], y, x] = -1.0  # just searched it from here
+        ml = getattr(env, "min_level", None)
+        if ml is not None:  # not below the safe height over trees, wires and towers
+            for k in range(cam.N_ALT):
+                S[k][ml > k] = -1.0
         S[~np.isfinite(S)] = -1.0
         return S, taken, D
 

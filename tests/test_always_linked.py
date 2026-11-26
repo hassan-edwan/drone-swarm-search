@@ -56,3 +56,31 @@ def test_under_canopy_check_happens_in_dense_forest():
     assert steps >= 1 and env.mode[a] != "under"
     assert env._v.cand_t[y, x] < 0
     assert env.n_under == 1
+
+
+def test_safe_heights_make_drones_climb_and_the_rule_respects_them():
+    import numpy as np
+    from swarmsearch.field import env as fe
+    sc = dataclasses.replace(FIELD_CONDITIONS["wild_mix"](4), n_drones=2)
+    env = FieldEnv()
+    env.reset(seed=3, options={"scenario": sc})
+    a = env.agents[0]
+    x, y = (int(v) for v in env.pos[a])
+    env.min_level[:] = 0
+    env.min_level[:, x + 1:] = 1  # everything east needs the middle height
+    env.alt[a] = env.alt_tgt[a] = 0
+    env.alt_now[a] = env.fam.alt_m[0]
+    east = 4  # MOVES order: nw, n, ne, w, e, sw, s, se
+    assert env.action_mask(a)[east] == 0
+    env.step({b: (east if b == a else fe.HOVER) for b in env.agents})
+    assert env.alt_tgt[a] >= 1 and int(env.pos[a][0]) == x  # climbed instead of entering
+    pol = BeliefGreedy()
+    pol.reset(env)
+    S, taken, D = pol.rule_scores(env, a, [env.footprint_values(k) for k in range(3)], [a])
+    assert np.all(S[0][:, x + 1:] <= 0)
+
+
+def test_real_site_loads_flight_limits():
+    env = FieldEnv()
+    env.reset(seed=0, options={"scenario": FIELD_CONDITIONS["wild_real_hamlet"](0)})
+    assert env.min_level.max() >= 1 and env.under_p is not None and (env.under_p >= 0).any()

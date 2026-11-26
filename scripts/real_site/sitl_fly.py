@@ -51,6 +51,11 @@ PARAMS = {
     "ATC_ANGLE_MAX": 45.0, "PSC_NE_JERK": 10.0, "LOIT_SPEED_MS": 20.0,
     "FENCE_ENABLE": 0, "SIM_WIND_TURB": 1.0, "BATT_MONITOR": 0, "FS_GCS_ENABLE": 0, "DISARM_DELAY": 0,
 }
+# GPS under dense canopy: consumer receivers lose satellites and suffer multipath, typically
+# several metres of error that wanders slowly; in the open, normal GPS.
+GPS_OPEN = {"SIM_GPS1_NOISE": 0.0, "SIM_GPS1_NUMSATS": 10, "SIM_GPS1_GLTCH_X": 0.0, "SIM_GPS1_GLTCH_Y": 0.0}
+GPS_CANOPY = {"SIM_GPS1_NOISE": 3.0, "SIM_GPS1_NUMSATS": 6}
+GPS_BIAS_MAX = 6.0  # metres: the slowly wandering multipath offset under the crowns
 MASK_POS = 0b110111111000  # position only; ArduPilot makes its own velocity (feeding the plan's velocity
 # forward made the copter run on past a target the follower was still waiting at)
 
@@ -143,10 +148,12 @@ class Copter:
         self.m.mav.request_data_stream_send(self.m.target_system, self.m.target_component,
                                             mavutil.mavlink.MAV_DATA_STREAM_ALL, 0, 0)
         for mid, hz in ((mavutil.mavlink.MAVLINK_MSG_ID_LOCAL_POSITION_NED, 10),
-                        (mavutil.mavlink.MAVLINK_MSG_ID_SYSTEM_TIME, 5)):
+                        (mavutil.mavlink.MAVLINK_MSG_ID_SYSTEM_TIME, 5),
+                        (mavutil.mavlink.MAVLINK_MSG_ID_SIMSTATE, 10)):
             self.cmd(mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, mid, 1e6 / hz)
         self.t_boot = 0.0
         self.pos = None
+        self.truth = None  # simulator's true latitude, longitude (the estimate is what GPS and the EKF think)
 
     def poll(self):
         """Read waiting messages; keep the latest local position (metres NED) and boot time."""
@@ -158,10 +165,17 @@ class Copter:
             if tp == "LOCAL_POSITION_NED":
                 self.pos = (msg.x, msg.y, msg.z, msg.vx, msg.vy, msg.vz)
                 self.t_boot = msg.time_boot_ms / 1000.0
+            elif tp == "SIMSTATE":
+                self.truth = (msg.lat * 1e-7, msg.lng * 1e-7)
             elif tp == "SYSTEM_TIME":
                 self.t_boot = max(self.t_boot, msg.time_boot_ms / 1000.0)
             elif hasattr(msg, "time_boot_ms"):
                 self.t_boot = max(self.t_boot, msg.time_boot_ms / 1000.0)
+
+    def send_params(self, d):
+        for k, v in d.items():
+            self.m.mav.param_set_send(self.m.target_system, self.m.target_component, k.encode(), float(v),
+                                      self.mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
 
     def set_params(self, tries=5):
         """Set and read back every parameter (sets sent before the parameter system is up are lost)."""
@@ -276,6 +290,12 @@ def fly_one(args):
         flown = []
         last_send = -1.0
         stall = 0.0
+        gps_bad = False
+        bias = np.zeros(2)
+        last_bias = 0.0
+        rng = np.random.default_rng(idx)
+        lat0, lon0 = meta["lat"], meta["lon"]
+        kx = 111_320.0 * math.cos(math.radians(lat0))
         under_m = np.isin(modes, ["descend", "under", "look", "climb"])
         while tau < T[-1]:
             c.poll()
@@ -292,6 +312,18 @@ def fly_one(args):
                     tau, stall = float(ts[k]), 0.0
                 ki = min(int(np.searchsorted(T, tau)), len(T) - 1)
                 under_now = bool(under_m[ki])
+                if a.gps == "degraded":  # GPS goes bad below the crowns (descent, under, look, climb)
+                    if under_now and not gps_bad:
+                        c.send_params(GPS_CANOPY)
+                        gps_bad = True
+                    elif not under_now and gps_bad:
+                        c.send_params(GPS_OPEN)
+                        gps_bad, bias = False, np.zeros(2)
+                    if gps_bad and now - last_bias >= 2.0:
+                        bias = np.clip(bias + rng.normal(0, 1.0, 2), -GPS_BIAS_MAX, GPS_BIAS_MAX)
+                        # the glitch offsets are in degrees of latitude (X) and longitude (Y)
+                        c.send_params({"SIM_GPS1_GLTCH_X": bias[1] / M_PER_DEG_LAT, "SIM_GPS1_GLTCH_Y": bias[0] / kx})
+                        last_bias = now
                 # the clock runs on by itself while the drone keeps up; after a long stall it runs anyway
                 close = math.dist(here, interp(plan, tau)[0]) < (2.0 if under_now else 8.0)
                 stall = stall + 0.1 if not close else 0.0
@@ -301,7 +333,8 @@ def fly_one(args):
                 p, _ = interp(plan, tau + lead)
                 c.target(ned_of(p), (0.0, 0.0, 0.0))
                 last_send = now
-                flown.append((now, *here, tau))
+                true_xy = ((c.truth[1] - lon0) * kx, (c.truth[0] - lat0) * M_PER_DEG_LAT) if c.truth else here[:2]
+                flown.append((now, true_xy[0], true_xy[1], here[2], tau, here[0], here[1]))
             time.sleep(0.005)
         log(f"done: {len(flown)} samples")
         c.close()
@@ -326,6 +359,11 @@ def main():
     ap.add_argument("--instance0", type=int, default=0, help="first SITL instance (ports 5760 + 10 * instance)")
     ap.add_argument("--out", default="")
     ap.add_argument("--only", default="", help="fly only this drone")
+    ap.add_argument("--gps", default="degraded", choices=["degraded", "good"],
+                    help="GPS under the canopy: degraded (noise, few satellites, wandering offset) or good (as if "
+                         "the drone navigated by camera there: visual-inertial odometry)")
+    ap.add_argument("--drone", default="sar", choices=list(f3.DRONES))
+    ap.add_argument("--season", default="leaf-on", choices=["leaf-on", "leaf-off"])
     ap.add_argument("--verbose", action="store_true")
     a = ap.parse_args()
     flight = Path(a.flight)
@@ -334,8 +372,9 @@ def main():
     meta = json.load(open(site / "meta.json"))
     D = json.load(open(flight))
     info = D["info"]
-    s3 = f3.Site3D.load(a.fine_from, shift=tuple(a.shift))
-    outer = f3.CoarseTerrain(site / "lidar10.npz")
+    hz = site / "hazards.json"
+    s3 = f3.Site3D.load(a.fine_from, shift=tuple(a.shift), hazards=hz, season=a.season)
+    outer = f3.CoarseTerrain(site / "lidar10.npz", hazards=hz)
     home_xy = tuple(info["base"])
     home_alt = float(min(s3.dtm.min(), outer.dtm.min()) - 5.0)
     jobs, delays = [], {}
@@ -356,10 +395,11 @@ def main():
             report[name] = dict(error=r["error"])
             print(f"{name}: {r['error']}")
             continue
-        F = np.array(r["flown"])  # t, x, y, z, plan time reached
+        F = np.array(r["flown"])  # t, true x, y, height, plan time reached, estimated x, y
+        est_err = np.hypot(F[:, 1] - F[:, 5], F[:, 2] - F[:, 6]) if F.shape[1] >= 7 else np.zeros(len(F))
         dense = np.array([interp(P, t)[0] for t in np.arange(P[0, 0], P[-1, 0], 0.1)])
         cross, vert, mode_at = [], [], []
-        for t, x, y, z, tau in F:
+        for t, x, y, z, tau, *_ in F:
             lo = int(np.searchsorted(np.arange(P[0, 0], P[-1, 0], 0.1), tau - 3.0))
             seg = dense[max(0, lo):lo + 120]
             dd = np.hypot(seg[:, 0] - x, seg[:, 1] - y)
@@ -370,13 +410,14 @@ def main():
             mode_at.append(modes[k])
         cross, vert = np.array(cross), np.array(vert)
         under = np.isin(mode_at, ["under", "look"])
-        flown_tr = [(t, x, y, z, m) for (t, x, y, z, _), m in zip(F, mode_at)]
-        clr = f3.clearance(s3, flown_tr)
+        flown_tr = [(row[0], row[1], row[2], row[3], m) for row, m in zip(F, mode_at)]
+        clr = f3.clearance(s3, flown_tr, drone=a.drone)
         rep = dict(points=len(F), plan_s=float(P[-1, 0] - P[0, 0]), lag_s=r.get("lag_s"),
                    behind_grid_clock_s=delays.get(name, 0.0),
                    cross_err_mean=float(cross.mean()), cross_err_p95=float(np.percentile(cross, 95)),
                    cross_err_max=float(cross.max()), vert_err_mean=float(np.abs(vert).mean()),
                    vert_err_max=float(np.abs(vert).max()), clearance_flown={k: float(v) for k, v in clr.items()})
+        rep["gps_err_max_under"] = float(est_err[under].max()) if under.any() else 0.0
         if under.any():
             rep.update(under_cross_mean=float(cross[under].mean()), under_cross_max=float(cross[under].max()),
                        under_vert_max=float(np.abs(vert[under]).max()))
@@ -385,12 +426,14 @@ def main():
         print(f"{name}: off the path {rep['cross_err_mean']:.2f} m mean / {rep['cross_err_p95']:.2f} m 95% / "
               f"{rep['cross_err_max']:.1f} m max, height {rep['vert_err_mean']:.2f} m mean / {rep['vert_err_max']:.1f} m max"
               + (f"; under the canopy {rep['under_cross_mean']:.2f} m mean / {rep['under_cross_max']:.2f} m max off the path, "
-                 f"{rep['under_vert_max']:.2f} m max in height" if under.any() else "")
+                 f"{rep['under_vert_max']:.2f} m max in height, GPS off by up to {rep['gps_err_max_under']:.1f} m"
+                 if under.any() else "")
               + f"; the flyable plan takes {rep['behind_grid_clock_s']:.0f} s longer than the search grid's clock, "
                 f"and ArduPilot {rep['lag_s']:+.0f} s on top"
               + "; flown clearances " + ", ".join(f"{k} {v:.1f}" for k, v in clr.items() if np.isfinite(v)))
-    out = Path(a.out) if a.out else flight.with_name(flight.stem + f"_sitl_wind{a.wind:.0f}.json")
-    json.dump(dict(report=report, wind=a.wind, wind_dir=a.wind_dir, home_alt=home_alt,
+    out = Path(a.out) if a.out else flight.with_name(flight.stem + f"_sitl_wind{a.wind:.0f}_gps{a.gps}.json")
+    json.dump(dict(report=report, wind=a.wind, wind_dir=a.wind_dir, home_alt=home_alt, gps=a.gps, drone=a.drone,
+                   season=a.season,
                    flown={r["name"]: r.get("flown") for r in res}), open(out, "w"))
     print(f"wrote {out} in {time.time() - t0:.0f}s")
 

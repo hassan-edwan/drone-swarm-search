@@ -22,6 +22,18 @@ Flight modes:
 Under-canopy flight is used to check alerts in dense forest (field env mode
 "under"): the planner picks the gap that makes the whole trip (there in
 cruise, down, under the crowns to the spot, back, up) quickest.
+
+Also (what lidar and footprints miss): wires and tall structures from
+hazards.json (scripts/real_site/fetch_hazards.py: FAA-registered towers with
+their guy wires, high-voltage lines, and assumed local power lines along
+roads and service wires to houses), each a band of blocked height over the
+ground. Cruise climbs over them; under-canopy routes and descents avoid them.
+
+Clearances are edge to edge: the drone's size (DRONES: a SAR quad about 1 m
+across with propellers, or a small 0.4 m drone of the kind used under trees)
+and a trunk radius are taken off. The obstacles come from leaf-off lidar; for
+a summer search (season "leaf-on") undergrowth and low branches are assumed
+denser, crowns reach 2 m lower and openings close by 1 m.
 """
 
 from __future__ import annotations
@@ -43,6 +55,9 @@ HEAD_M = 2.0  # clearance between the drone and the crown bottom above it
 GAP_R_M = 3.0  # radius of an opening the drone can descend through
 CRUISE_MPS, LOW_MPS, CLIMB_MPS, DESCEND_MPS = 10.0, 2.0, 4.0, 3.0
 REACH_M = 15.0  # a look under the canopy sees about this far between trunks and undergrowth
+DRONES = {"sar": dict(span=1.0, height=0.4), "small": dict(span=0.4, height=0.2)}  # span with propellers
+TRUNK_R = 0.3  # trunk radius (lidar does not see trunks; a typical mature hardwood)
+SAFETY_M = 1.0  # edge-to-edge margin kept from trunks, buildings, wires and crowns
 STEP = 2  # planning grid: metres per cell for under-canopy routing
 
 
@@ -58,13 +73,18 @@ class Site3D:
     north0: float
     trees: np.ndarray = field(default_factory=lambda: np.zeros((0, 5)))  # x, y, height, crown radius, crown base
     clutter: np.ndarray | None = None  # lidar vegetation returns per m2 in the flying band under the canopy
+    hz_lo: np.ndarray | None = None  # wires and tall structures: blocked from this height above ground...
+    hz_hi: np.ndarray | None = None  # ...to this one (inf / -inf where there is none)
+    season: str = "leaf-on"
 
     @property
     def n(self):
         return self.dtm.shape[0]
 
     @classmethod
-    def load(cls, fine_npz, buildings_json=None, shift=(0.0, 0.0)):
+    def load(cls, fine_npz, buildings_json=None, shift=(0.0, 0.0), hazards=None, season="leaf-on"):
+        """fine_npz from lidar.py fine; shift moves its coordinates into the site's frame;
+        hazards: hazards.json in the site's frame."""
         d = np.load(fine_npz)
         bldg = d["bldg"] > 0.3
         top = np.where(bldg, 0.0, d["veg_top"])
@@ -77,10 +97,15 @@ class Site3D:
             bh = np.where(bldg, np.maximum(bh, np.asarray(hs)[np.maximum(lab - 1, 0)]), 0.0)
         s = cls(d["dtm"].astype(float), top.astype(float), base.astype(float), bldg, bh.astype(float),
                 float(d["east0"]) + shift[0], float(d["north0"]) + shift[1])
+        s.season = season
+        if season == "leaf-on":  # leaves fill in below the leaf-off crown bottom
+            s.crown_base = np.where(np.isfinite(s.crown_base), np.maximum(s.crown_base - 2.0, 0.5), s.crown_base)
         pts = Path(fine_npz).with_name("fine_points.npz")
         if pts.exists():
             s.clutter = s.band_counts(np.load(pts), shift)
         s.trees = s.find_trees()
+        if hazards is not None and Path(hazards).exists():
+            s.hz_lo, s.hz_hi = hazard_bands(json.load(open(hazards)), s.east0, s.north0, s.n, 1.0)
         return s
 
     def band_counts(self, P, shift=(0.0, 0.0)):
@@ -133,35 +158,97 @@ class Site3D:
         top = np.maximum(self.veg_top, self.bldg_h)
         return ndimage.maximum_filter(top, size=int(2 * side + 1))
 
-    def low_free(self):
-        """Cells (1 m) where a drone can fly LOW_M above the ground under the canopy."""
+    def low_free(self, drone="sar"):
+        """Cells (1 m) where the drone's centre can be, LOW_M above the ground under the canopy."""
+        dr = DRONES[drone]
         trunk = np.zeros_like(self.bldg)
         for x, y, *_ in self.trees:
             trunk[self.ij(x, y)] = True
-        near_trunk = ndimage.binary_dilation(trunk, iterations=int(math.ceil(TRUNK_M)))
-        near_bldg = ndimage.binary_dilation(self.bldg, iterations=int(math.ceil(SIDE_M)))
+        r_trunk = TRUNK_R + dr["span"] / 2 + SAFETY_M
+        r_bldg = dr["span"] / 2 + SAFETY_M + 1.0  # eaves, gutters, things against walls
+        near_trunk = ndimage.distance_transform_edt(~trunk) <= r_trunk
+        near_bldg = ndimage.distance_transform_edt(~self.bldg) <= r_bldg
         if self.clutter is not None:
-            # branches or undergrowth at flying height: several lidar returns in a 3 x 3 m patch
-            headroom = ndimage.uniform_filter(self.clutter, size=3) * 9 < 3
+            # branches or undergrowth at flying height: lidar returns in a 3 x 3 m patch
+            # (leaf-off: several; leaf-on: any, the leaves fill in around what the laser hit)
+            need = 1 if self.season == "leaf-on" else 3
+            headroom = ndimage.uniform_filter(self.clutter, size=3) * 9 < need - 0.5
         else:
-            headroom = (self.veg_top < 1.0) | (self.crown_base >= LOW_M + HEAD_M)
-            headroom = ndimage.minimum_filter(headroom.astype(np.uint8), size=3).astype(bool)
-        return headroom & ~near_trunk & ~near_bldg
+            headroom = np.ones_like(self.bldg)
+        top_of_drone = LOW_M + dr["height"] / 2 + SAFETY_M
+        headroom &= (self.veg_top < 1.0) | (self.crown_base >= top_of_drone)
+        headroom = ndimage.minimum_filter(headroom.astype(np.uint8), size=3).astype(bool)
+        free = headroom & ~near_trunk & ~near_bldg
+        if self.hz_lo is not None:  # wires at flying height (service drops to houses)
+            wire = self.hz_lo <= top_of_drone
+            free &= ~(ndimage.distance_transform_edt(~wire) <= dr["span"] / 2 + SAFETY_M)
+        return free
 
-    def gaps(self):
-        """Cells where a drone can go straight down from cruise to LOW_M: open sky above within GAP_R_M."""
+    def gaps(self, drone="sar"):
+        """Cells where a drone can go straight down from cruise to LOW_M: open sky within the drone's
+        half-span plus 2 m (plus 1 m in leaf-on season), no wire or tower above."""
         open_sky = (self.veg_top < 1.0) & ~self.bldg
-        r = int(math.ceil(GAP_R_M))
-        yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
-        disk = (xx ** 2 + yy ** 2) <= r * r
-        return ndimage.binary_erosion(open_sky, structure=disk)
+        if self.hz_lo is not None:
+            open_sky &= ~np.isfinite(self.hz_lo)
+        r = DRONES[drone]["span"] / 2 + 2.0 + (1.0 if self.season == "leaf-on" else 0.0)
+        return ndimage.distance_transform_edt(open_sky) > r
+
+
+def hazard_bands(H, east0, north0, n, cell):
+    """Blocked height bands (above ground) on an n x n grid of `cell` metres centred at (east0, north0)."""
+    lo = np.full((n, n), np.inf)
+    hi = np.full((n, n), -np.inf)
+    half = n * cell / 2
+    xs = east0 - half + (np.arange(n) + 0.5) * cell
+    ys = north0 + half - (np.arange(n) + 0.5) * cell
+    X, Y = np.meshgrid(xs, ys)
+
+    def add(mask, z0, z1):
+        lo[mask] = np.minimum(lo[mask], z0)
+        hi[mask] = np.maximum(hi[mask], z1)
+
+    def lines_mask(lines, half_w):
+        m = np.zeros((n, n), bool)
+        for ln in lines:
+            P = np.asarray(ln, float)
+            for a, b in zip(P[:-1], P[1:]):
+                if (max(a[0], b[0]) < east0 - half - half_w or min(a[0], b[0]) > east0 + half + half_w
+                        or max(a[1], b[1]) < north0 - half - half_w or min(a[1], b[1]) > north0 + half + half_w):
+                    continue
+                k = max(2, int(np.hypot(*(b - a)) / (cell / 2)) + 1)
+                q = a + np.linspace(0, 1, k)[:, None] * (b - a)
+                j = np.floor((q[:, 0] - (east0 - half)) / cell).astype(int)
+                i = np.floor(((north0 + half) - q[:, 1]) / cell).astype(int)
+                ok = (i >= 0) & (i < n) & (j >= 0) & (j < n)
+                m[i[ok], j[ok]] = True
+        if not m.any():
+            return m
+        return ndimage.distance_transform_edt(~m) * cell <= half_w
+
+    bands = H.get("bands", {})
+    tr = bands.get("transmission", dict(z0=8, z1=45, half_w=15))
+    add(lines_mask([ln["pts"] for ln in H.get("transmission", [])], tr["half_w"]), tr["z0"], tr["z1"])
+    di = bands.get("distribution", dict(z0=5, z1=13, half_w=6))
+    add(lines_mask(H.get("distribution", []), di["half_w"]), di["z0"], di["z1"])
+    sv = bands.get("service", dict(z0=3.5, z1=8, half_w=1.5))
+    add(lines_mask(H.get("service", []), sv["half_w"]), sv["z0"], sv["z1"])
+    for t in H.get("towers", []):
+        r = np.hypot(X - t["x"], Y - t["y"])
+        if r.min() > t["guy_r"] + cell:
+            continue
+        mast = r <= 3.0 + cell / 2
+        add(mast, 0.0, t["h"] + 3.0)
+        if t["guy_r"] > 3.0:  # guy wires from near the top down to anchors at guy_r: under that cone
+            cone = (r > 3.0) & (r <= t["guy_r"])
+            add(cone, 0.0, t["h"] * (1 - r[cone] / t["guy_r"]) + 3.0)
+    return lo, hi
 
 
 class CoarseTerrain:
     """Ground and highest obstacle from 10 m lidar layers (lidar.py coarse), for cruising
     outside the area mapped at full density. Coordinates as Site3D."""
 
-    def __init__(self, lidar10_npz, side=SIDE_M):
+    def __init__(self, lidar10_npz, side=SIDE_M, hazards=None):
         d = np.load(lidar10_npz)
         self.cell = float(d["cell"])
         self.size = float(d["size_m"])
@@ -169,8 +256,11 @@ class CoarseTerrain:
         self.dtm = d["dtm"]
         # the 95th percentile crown height under-reads single tall trees: add a margin
         top = np.maximum(d["chm"] * 1.15, np.where(d["bldg"] > 0.1, np.maximum(d["bldg_h"], 6.0), 0.0))
-        self.top = ndimage.maximum_filter(top, size=3)
         self.n = self.dtm.shape[0]
+        if hazards is not None and Path(hazards).exists():
+            _, hi = hazard_bands(json.load(open(hazards)), self.e0, self.n0, self.n, self.cell)
+            top = np.maximum(top, np.where(np.isfinite(hi), hi, 0.0))
+        self.top = ndimage.maximum_filter(top, size=3)
 
     def ij(self, x, y):
         i = int(np.clip(((self.n0 + self.size / 2) - y) / self.cell, 0, self.n - 1))
@@ -185,17 +275,22 @@ class CoarseTerrain:
 
 
 class Planner:
-    def __init__(self, site: Site3D, outer: CoarseTerrain | None = None):
+    def __init__(self, site: Site3D, outer: CoarseTerrain | None = None, drone: str = "sar"):
         self.s = site
         self.outer = outer
-        self.top = site.obstacle_top()
-        free1 = site.low_free()
-        gap1 = site.gaps()
+        self.drone = drone
+        self._half_h = DRONES[drone]["height"] / 2
+        self.top = site.obstacle_top(SIDE_M + DRONES[drone]["span"] / 2)
+        if site.hz_hi is not None:
+            hz = np.where(np.isfinite(site.hz_hi), site.hz_hi, 0.0)
+            self.top = np.maximum(self.top, ndimage.maximum_filter(hz, size=int(2 * SIDE_M + 1)))
+        free1 = site.low_free(drone)
+        gap1 = site.gaps(drone)
         n2 = site.n // STEP
         cut = n2 * STEP
-        # a 2 m cell is free when all its 1 m cells are; a gap when any is (and it is free)
+        # a 2 m cell is free, or a gap to descend through, when all its 1 m cells are
         self.free = free1[:cut, :cut].reshape(n2, STEP, n2, STEP).all((1, 3))
-        self.gap = gap1[:cut, :cut].reshape(n2, STEP, n2, STEP).any((1, 3)) & self.free
+        self.gap = gap1[:cut, :cut].reshape(n2, STEP, n2, STEP).all((1, 3)) & self.free
         self.n2 = n2
         # connected open space under the crowns; tiny pockets are not reachable in practice
         lab, nl = ndimage.label(self.free, structure=np.ones((3, 3)))
@@ -210,11 +305,11 @@ class Planner:
             if self.outer is not None and self.outer.inside(x, y):
                 i, j = self.outer.ij(x, y)
                 g = self.outer.dtm[i, j]
-                return float(max(g + agl, g + self.outer.top[i, j] + CLEAR_M))
+                return float(max(g + agl, g + self.outer.top[i, j] + CLEAR_M + self._half_h))
             return None
         i, j = s.ij(x, y)
         g = s.dtm[i, j]
-        return float(max(g + agl, g + self.top[i, j] + CLEAR_M))
+        return float(max(g + agl, g + self.top[i, j] + CLEAR_M + self._half_h))
 
     def ground(self, x, y):
         if self.s.inside(x, y):
@@ -354,12 +449,15 @@ class Planner:
                           close_enough=reach <= REACH_M)
 
 
-def clearance(site: Site3D, traj, mode_filter=None):
-    """Smallest distances to obstacles along a trajectory: above ground, below crowns
-    (under-canopy legs), from trunks, from buildings, and above crowns and roofs (cruise)."""
+def clearance(site: Site3D, traj, mode_filter=None, drone="sar"):
+    """Smallest edge-to-edge distances to obstacles along a trajectory (the drone's size and the
+    trunk radius taken off): above ground, below crowns (under-canopy legs), from trunks and
+    buildings, above crowns and roofs (cruise), and from wires and tall structures (any leg)."""
+    dr = DRONES[drone]
     trunks = site.trees[:, :2] if len(site.trees) else np.zeros((0, 2))
-    out = dict(ground=np.inf, under_crown=np.inf, trunk=np.inf, building=np.inf, over_top=np.inf)
+    out = dict(ground=np.inf, under_crown=np.inf, trunk=np.inf, building=np.inf, over_top=np.inf, wire=np.inf)
     bpts = np.argwhere(site.bldg)
+    hz = site.hz_lo is not None
     for t, x, y, z, mode in traj:
         if mode_filter and mode not in mode_filter:
             continue
@@ -367,19 +465,29 @@ def clearance(site: Site3D, traj, mode_filter=None):
             continue
         i, j = site.ij(x, y)
         h = z - site.dtm[i, j]
-        out["ground"] = min(out["ground"], h)
+        bottom, top = h - dr["height"] / 2, h + dr["height"] / 2
+        out["ground"] = min(out["ground"], bottom)
+        if hz:
+            i0, i1, j0, j1 = max(0, i - 2), i + 3, max(0, j - 2), j + 3
+            lo, hi = site.hz_lo[i0:i1, j0:j1], site.hz_hi[i0:i1, j0:j1]
+            m = np.isfinite(lo)
+            if m.any():
+                gap = np.where(top < lo[m], lo[m] - top, np.where(bottom > hi[m], bottom - hi[m], -1.0))
+                out["wire"] = min(out["wire"], float(gap.min()))
         if mode in ("under", "look"):
             if site.veg_top[i, j] > h:
-                out["under_crown"] = min(out["under_crown"], site.crown_base[i, j] - h)
+                out["under_crown"] = min(out["under_crown"], site.crown_base[i, j] - top)
             if len(trunks):
-                out["trunk"] = min(out["trunk"], float(np.min(np.hypot(trunks[:, 0] - x, trunks[:, 1] - y))))
+                d = float(np.min(np.hypot(trunks[:, 0] - x, trunks[:, 1] - y)))
+                out["trunk"] = min(out["trunk"], d - TRUNK_R - dr["span"] / 2)
             if len(bpts):
                 near = bpts[(np.abs(bpts[:, 0] - i) < 30) & (np.abs(bpts[:, 1] - j) < 30)]
                 if len(near):
-                    out["building"] = min(out["building"], float(np.min(np.hypot(near[:, 0] - i, near[:, 1] - j))))
+                    d = float(np.min(np.hypot(near[:, 0] - i, near[:, 1] - j)))
+                    out["building"] = min(out["building"], d - dr["span"] / 2)
         elif mode == "cruise":
-            top = max(site.veg_top[i, j], site.bldg_h[i, j])
-            out["over_top"] = min(out["over_top"], h - top)
+            tt = max(site.veg_top[i, j], site.bldg_h[i, j])
+            out["over_top"] = min(out["over_top"], bottom - tt)
     return out
 
 

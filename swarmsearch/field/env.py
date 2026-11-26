@@ -180,6 +180,11 @@ class FieldEnv(GridSearchEnv):
         w = make_world(np.random.default_rng(sc.seed_world), sc)
         self.w = w
         g = self.grid_size = w.g
+        # lowest search height allowed per cell (crowns, roofs, wires, towers); 0 everywhere by default
+        self.min_level = np.asarray(w.extra.get("min_level", np.zeros((w.g, w.g), int)))
+        self.under_p = w.extra.get("under_p")
+        self.under_s = w.extra.get("under_s")
+        self.under_tried = set()
         self._M = _pool_matrix(g)
         self.alt_m_levels = fam.alt_m
         self.foot_r = fam.foot_r
@@ -281,6 +286,7 @@ class FieldEnv(GridSearchEnv):
         self.n_near = self.n_crash = self.n_swaps = self.n_launch_fail = 0
         self.n_under = 0  # alerts checked from under the trees
         self.n_under_finds = 0  # finds confirmed from such a check
+        self.n_under_blocked = 0  # checks that could not get close (undergrowth, wires)
         self.linked_steps = 0.0
         # Evidence and others in the area (K7, S8), on their own random stream so that
         # missions without them run exactly as before.
@@ -433,22 +439,45 @@ class FieldEnv(GridSearchEnv):
             return m  # the autopilot has it
         x, y = self.pos[a]
         occupied = {tuple(self.pos[b]) for b in self.agents if b != a and self.alive[b] and self.mode[b] != "landed"}
+        lv = self.alt[a]
         for k, (dx, dy) in enumerate(MOVES[:8]):
             nx, ny = x + dx, y + dy
-            if self._flyable(nx, ny) and (nx, ny) not in occupied:
+            if self._flyable(nx, ny) and (nx, ny) not in occupied and self._high_enough(nx, ny, lv):
                 m[k] = 1
-                if self._flyable(nx + dx, ny + dy) and (nx + dx, ny + dy) not in occupied:
+                if (self._flyable(nx + dx, ny + dy) and (nx + dx, ny + dy) not in occupied
+                        and self._high_enough(nx + dx, ny + dy, lv)):
                     m[SPRINT0 + k] = 1
         m[CLIMB] = self.alt_tgt[a] < 2
-        m[DESCEND] = self.alt_tgt[a] > 0
+        m[DESCEND] = self.alt_tgt[a] > max(0, int(self.min_level[y, x]))
         return m
+
+    def _high_enough(self, x, y, level) -> bool:
+        g = self.grid_size
+        return not (0 <= x < g and 0 <= y < g) or level >= self.min_level[y, x]
+
+    def _needs_climb(self, a, act) -> bool:
+        """A move that is blocked only because the next cell needs a higher search height."""
+        if act >= 8 and act < SPRINT0:
+            return False
+        k = act if act < 8 else act - SPRINT0
+        steps = 1 if act < 8 else 2
+        x, y = self.pos[a]
+        for s_ in range(1, steps + 1):
+            nx, ny = x + s_ * MOVES[k][0], y + s_ * MOVES[k][1]
+            if self._flyable(nx, ny) and not self._high_enough(nx, ny, self.alt[a]):
+                return True
+        return False
 
     def targets(self, actions, count: bool = False) -> dict:
         live = [a for a in self.agents if self.alive[a] and self.mode[a] != "landed"]
         target = {}
         for a in live:
             act = self._auto_action(a) if self.mode[a] is not None else int(actions.get(a, HOVER))
-            if not self.action_mask(a)[act] and self.mode[a] is None:
+            if (act < 8 or act >= SPRINT0) and self._needs_climb(a, act):
+                # trees, wires or a tower ahead need a higher search height: climb first, then go
+                self.alt_tgt[a] = min(2, max(self.alt_tgt[a], self.alt[a] + 1))
+                act = HOVER
+            elif not self.action_mask(a)[act] and self.mode[a] is None:
                 act = HOVER
             self.last_act[a] = act
             if act < 8:
@@ -584,6 +613,8 @@ class FieldEnv(GridSearchEnv):
                     self.alt_tgt[a] += 1
                 elif act == DESCEND and self.alt_tgt[a] > 0:
                     self.alt_tgt[a] -= 1
+            cx_, cy_ = self.pos[a]
+            self.alt_tgt[a] = max(self.alt_tgt[a], min(2, int(self.min_level[cy_, cx_])))
             goal = fam.alt_m[self.alt_tgt[a]]
             rate = (CLIMB_MPS if goal > self.alt_now[a] else DESCEND_MPS) * fam.step_s
             new_h = self.alt_now[a] + float(np.clip(goal - self.alt_now[a], -rate, rate))
@@ -684,6 +715,8 @@ class FieldEnv(GridSearchEnv):
 
         self.w = big
         self.grid_size = G
+        self.min_level = np.zeros((G, G), int)  # generated worlds have no per-cell flight limits
+        self.under_p = self.under_s = None
         self._M = _pool_matrix(G)
         self.G_true = sn.geo_table(big.surface, big.elev, big.walk, fam.alt_m, fam.foot_r, fam.alt_detect)
         self.water = big.water.copy()
@@ -925,6 +958,7 @@ class FieldEnv(GridSearchEnv):
         self.n_visits += 1
         if self.freshness()[ey, ex] >= 0.9 and k == 0:
             self.n_repeats += 1
+        pending_here = k == 0 and v.cand_t[ey, ex] >= 0  # an unresolved alert where we now are, low
         Gt = self.G_true[k, ty, tx]
         ppl = self.people
         reports = set()
@@ -1004,18 +1038,30 @@ class FieldEnv(GridSearchEnv):
             v.N[cls, my, mx] = n + 1
             v.exp_low += detected * n_est / max(s, 1e-6)  # expected finds with the nominal sensor
             reward += REWARD_DETECT * detected * max(1, self.n_free)
-        self._maybe_go_under(a, k, ex, ey)
+        self._maybe_go_under(a, k, ex, ey, pending_here)
         return reward
 
-    def _maybe_go_under(self, a, k, ex, ey):
-        """At the lowest height over an unresolved alert in dense forest, check it from under the trees."""
+    def _maybe_go_under(self, a, k, ex, ey, pending=False):
+        """At the lowest height over an unresolved alert in dense forest (a look from above
+        through the leaves does not settle it), check it from under the trees, where the 3D
+        planner says that can work (flight_limits.npz); once per alert spot."""
         sc, fam, v = self.scenario, self.fam, self._v
         if not sc.under_canopy or k != 0 or self.mode[a] is not None:
             return
-        if v.cand_t[ey, ex] < 0 or self.w.map_canopy[ey, ex] < UNDER_MIN_COVER:
+        if not (pending or v.cand_t[ey, ex] >= 0) or self.w.map_canopy[ey, ex] < UNDER_MIN_COVER:
             return
+        if (ex, ey) in self.under_tried:
+            return
+        p = self.under_p[ey, ex] if self.under_p is not None else -1.0
+        if p == 0.0:  # no way in under the crowns here (undergrowth, no gap, wires)
+            self.under_tried.add((ex, ey))
+            return
+        v.cand_t[ey, ex] = max(v.cand_t[ey, ex], self.t)  # still open until checked from under the trees
+        self.under_tried.add((ex, ey))
         h = fam.alt_m[0]
         secs = h / DESCEND_MPS + UNDER_RUN_M / UNDER_MPS + h / CLIMB_MPS
+        if self.under_s is not None and self.under_s[ey, ex] > 0:
+            secs = float(self.under_s[ey, ex])  # the planned trip through the real obstacles
         self.mode[a] = "under"
         self.mode_t[a] = max(1, int(np.ceil(secs / fam.step_s)))
         self.mode_target[a] = (int(ex), int(ey))
@@ -1027,6 +1073,10 @@ class FieldEnv(GridSearchEnv):
         ex, ey = self.mode_target[a]
         tx, ty = (int(c) for c in self.true_pos[a])
         self.mode[a] = None
+        p_close = self.under_p[ey, ex] if self.under_p is not None and self.under_p[ey, ex] >= 0 else 1.0
+        if rng.random() >= p_close:  # could not get within sight of the spot under the trees
+            self.n_under_blocked += 1
+            return 0.0
         ppl = self.people
         here = np.flatnonzero(~self.found & ~ppl.outside & (ppl.pos[:, 0] == tx) & (ppl.pos[:, 1] == ty))
         seen_i = None
@@ -1450,6 +1500,7 @@ class FieldEnv(GridSearchEnv):
             "expanded_min": self.expanded_t * self.fam.step_s / 60.0 if self.expanded_t >= 0 else None,
             "under_checks": self.n_under,
             "under_finds": self.n_under_finds,
+            "under_blocked": self.n_under_blocked,
             "coverage": float(self.visited[self.w.walk].mean()),
             "repeat_frac": self.n_repeats / max(1, self.n_visits),
             "collisions": self.n_collisions,

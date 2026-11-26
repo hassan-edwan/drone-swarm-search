@@ -30,7 +30,7 @@ def test_cruise_clears_terrain_and_crowns():
     tr = P.cruise(s.xy(100, 5), s.xy(100, 195), 40.0)
     c = f3.clearance(s, tr)
     assert c["over_top"] >= f3.CLEAR_M - 1e-6
-    assert c["ground"] >= 40.0 - 1e-6
+    assert c["ground"] >= 40.0 - f3.DRONES["sar"]["height"] / 2 - 1e-6
 
 
 def test_under_check_goes_down_a_gap_and_keeps_clear():
@@ -44,7 +44,24 @@ def test_under_check_goes_down_a_gap_and_keeps_clear():
     gi, gj = s.ij(*info["gap"])
     assert s.veg_top[gi, gj] < 1.0  # descended where there is open sky
     c = f3.clearance(s, tr)
-    assert c["trunk"] >= f3.TRUNK_M - 1e-6
-    assert c["under_crown"] >= f3.HEAD_M - 1e-6
-    assert c["ground"] >= f3.LOW_M - 1e-6
+    # edge to edge: the drone's size and the trunk radius are taken off
+    assert c["trunk"] >= f3.SAFETY_M - 1e-6
+    assert c["under_crown"] >= f3.SAFETY_M - 1e-6
+    assert c["ground"] >= f3.LOW_M - f3.DRONES["sar"]["height"] / 2 - 1e-6
     assert info["reach_m"] < f3.REACH_M
+
+
+def test_wires_block_low_flight_and_raise_cruise():
+    s = _site()
+    H = dict(transmission=[dict(pts=[s.xy(100, 0), s.xy(100, 199)])], distribution=[], service=[],
+             towers=[], bands=dict(transmission=dict(z0=8, z1=45, half_w=15)))
+    s.hz_lo, s.hz_hi = f3.hazard_bands(H, s.east0, s.north0, s.n, 1.0)
+    P = f3.Planner(s)
+    tr = P.cruise(s.xy(10, 100), s.xy(190, 100), 40.0)  # crosses the line at 40 m: must go over it
+    c = f3.clearance(s, tr)
+    assert c["wire"] >= 0.0
+    assert max(q[3] - s.ground(q[1], q[2]) for q in tr) >= 45.0 + f3.CLEAR_M
+    # no descent through the corridor
+    gi, gj = np.nonzero(P.gap)
+    xs = [P._xy2(i, j) for i, j in zip(gi, gj)]
+    assert all(abs(y - s.xy(100, 0)[1]) > 15 for _, y in xs)

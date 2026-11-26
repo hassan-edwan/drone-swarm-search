@@ -30,7 +30,8 @@ VARIANTS = {
     "new sensing": dict(canopy_model="visibility", under_canopy=False),
     "new sensing + under-canopy checks": dict(canopy_model="visibility", under_canopy=True),
 }
-WORLDS = {"generated wilderness": None, "real site (Catoctin, lidar)": "sites/catoctin/site.npz"}
+WORLDS = {"generated wilderness": None, "real site (Catoctin, lidar)": "sites/catoctin/site.npz",
+          "real site (hamlet, lidar + 3D flight limits)": "sites/catoctin_west/site.npz"}
 
 
 def one(job):

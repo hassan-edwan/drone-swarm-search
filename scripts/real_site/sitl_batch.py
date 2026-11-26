@@ -52,6 +52,10 @@ def main():
     ap.add_argument("--steps", type=int, default=60, help="simulator steps per mission (5 s each on this site)")
     ap.add_argument("--slots", type=int, default=4, help="flights at once")
     ap.add_argument("--speedup", type=float, default=10.0)
+    ap.add_argument("--gps", nargs="+", default=["degraded", "good"],
+                    help="GPS under the canopy: degraded (GPS only) and/or good (camera-based navigation)")
+    ap.add_argument("--season", default="leaf-on", choices=["leaf-on", "leaf-off"])
+    ap.add_argument("--drone", default="sar", choices=["sar", "small"])
     ap.add_argument("--ardupilot", default="~/ardupilot")
     ap.add_argument("--out", default="runs/sitl")
     a = ap.parse_args()
@@ -67,24 +71,26 @@ def main():
         if f.exists():
             return seed, 0
         return seed, run([py, str(HERE / "fly_mission.py"), "--site", a.site, "--seed", str(seed), "--steps",
-                          str(a.steps), "--test", "random", "--out-dir", str(out)], out / f"plan_seed{seed}.log")
+                          str(a.steps), "--test", "random", "--out-dir", str(out), "--season", a.season,
+                          "--drone", a.drone], out / f"plan_seed{seed}.log")
 
     with ThreadPoolExecutor(max(1, a.slots)) as ex:
         bad = [s for s, rc in ex.map(plan, seeds) if rc]
     print(f"plans: {len(seeds) - len(bad)} ok, {len(bad)} failed {bad[:10]} ({time.time() - t0:.0f}s)", flush=True)
 
     # 2. flights
-    jobs = [(s, w) for s in seeds if s not in bad for w in a.winds]
+    jobs = [(s, w, gp) for s in seeds if s not in bad for w in a.winds for gp in a.gps]
 
     def fly(job_slot):
-        (seed, wind), slot = job_slot
-        rep = out / f"sitl_seed{seed}_wind{wind:.0f}.json"
+        (seed, wind, gps), slot = job_slot
+        rep = out / f"sitl_seed{seed}_wind{wind:.0f}_gps{gps}.json"
         if rep.exists():
             return 0
         return run([py, str(HERE / "sitl_fly.py"), "--flight", str(out / f"flight_seed{seed}.json"), "--site", a.site,
                     "--ardupilot", a.ardupilot, "--wind", str(wind), "--speedup", str(a.speedup),
                     "--instance0", str(slot * MAX_DRONES), "--workdir", str(out / f"sitl_work_{slot}"),
-                    "--out", str(rep)], out / f"sitl_seed{seed}_wind{wind:.0f}.log")
+                    "--gps", gps, "--season", a.season, "--drone", a.drone,
+                    "--out", str(rep)], out / f"sitl_seed{seed}_wind{wind:.0f}_gps{gps}.log")
 
     free = list(range(a.slots))
     import threading
@@ -103,45 +109,49 @@ def main():
         rcs = list(ex.map(with_slot, jobs))
     print(f"flights: {sum(r == 0 for r in rcs)} ok, {sum(r != 0 for r in rcs)} failed ({time.time() - t0:.0f}s)",
           flush=True)
-    summarise(out, a.winds)
+    summarise(out, a.winds, a.gps)
 
 
-def summarise(out: Path, winds):
+def summarise(out: Path, winds, gps_modes=("degraded", "good")):
     rows = []
     for f in sorted(out.glob("sitl_seed*_wind*.json")):
         d = json.load(open(f))
         for name, r in d["report"].items():
+            base = dict(wind=d["wind"], gps=d.get("gps", "good"), name=name)
             if "error" in r:
-                rows.append(dict(wind=d["wind"], name=name, error=r["error"]))
+                rows.append(dict(base, error=r["error"]))
                 continue
-            rows.append(dict(wind=d["wind"], name=name, **{k: v for k, v in r.items() if k != "clearance_flown"},
+            rows.append(dict(base, **{k: v for k, v in r.items() if k != "clearance_flown"},
                              **{f"clear_{k}": v for k, v in r["clearance_flown"].items()}))
     json.dump(rows, open(out / "summary.json", "w"))
-    lines = ["| Wind | Flights | Failed | Off the path: mean / 95% / max (m) | Under the canopy: max off path / "
-             "max height error (m) | Closest: ground / trunk / building / crown above (m) | Too close* | "
-             "Extra time vs grid clock: flyable plan / ArduPilot |", "|---|---|---|---|---|---|---|---|"]
-    for w in winds:
-        R = [r for r in rows if abs(r["wind"] - w) < 1e-6]
+    lines = ["| Wind | GPS under canopy | Flights | Failed | Off the path: mean / 95% / max (m) | Under the canopy: "
+             "max off path / max height error (m) | Closest, edge to edge: ground / trunk / building / crown above / "
+             "wire (m) | Too close* | Extra time vs grid clock: flyable plan / ArduPilot |",
+             "|---|---|---|---|---|---|---|---|---|"]
+    for w, gm in [(w, gm) for w in winds for gm in gps_modes]:
+        R = [r for r in rows if abs(r["wind"] - w) < 1e-6 and r["gps"] == gm]
         ok = [r for r in R if "error" not in r]
         if not ok:
-            lines.append(f"| {w:.0f} m/s | {len(R)} | {len(R)} | | | | | |")
+            lines.append(f"| {w:.0f} m/s | {gm} | {len(R)} | {len(R)} | | | | | |")
             continue
         g = lambda k: np.array([r[k] for r in ok if r.get(k) is not None and np.isfinite(r[k])])  # noqa: E731
         under = [r for r in ok if "under_cross_max" in r]
-        close = sum(1 for r in ok if r.get("clear_ground", 9) < 1.0 or r.get("clear_trunk", 9) < 1.0
-                    or r.get("clear_building", 9) < 2.0 or r.get("clear_under_crown", 9) < 1.0)
+        close = sum(1 for r in ok if r.get("clear_ground", 9) < 1.0 or r.get("clear_trunk", 9) < 0.5
+                    or r.get("clear_building", 9) < 1.0 or r.get("clear_under_crown", 9) < 0.5
+                    or r.get("clear_wire", 9) < 0.5)
+        mn = lambda k: g(k).min() if len(g(k)) else float("nan")  # noqa: E731
         plan_s = g("plan_s")
         lines.append(
-            f"| {w:.0f} m/s | {len(R)} | {len(R) - len(ok)} | {g('cross_err_mean').mean():.2f} / "
+            f"| {w:.0f} m/s | {gm} | {len(R)} | {len(R) - len(ok)} | {g('cross_err_mean').mean():.2f} / "
             f"{np.percentile(g('cross_err_p95'), 95):.1f} / {g('cross_err_max').max():.1f} | "
             + (f"{max(r['under_cross_max'] for r in under):.2f} / {max(r['under_vert_max'] for r in under):.2f} "
                f"({len(under)} flights)" if under else "none")
-            + f" | {g('clear_ground').min():.1f} / {g('clear_trunk').min() if len(g('clear_trunk')) else float('nan'):.1f} / "
-              f"{g('clear_building').min() if len(g('clear_building')) else float('nan'):.1f} / "
-              f"{g('clear_under_crown').min() if len(g('clear_under_crown')) else float('nan'):.1f} | {close} | "
+            + f" | {mn('clear_ground'):.1f} / {mn('clear_trunk'):.1f} / {mn('clear_building'):.1f} / "
+              f"{mn('clear_under_crown'):.1f} / {mn('clear_wire'):.1f} | {close} | "
               f"{100 * np.sum(g('behind_grid_clock_s')) / max(np.sum(plan_s - g('behind_grid_clock_s')), 1):.0f}% / "
               f"{100 * np.sum(g('lag_s')) / max(np.sum(plan_s), 1):+.0f}% |")
-    lines.append("\n*Too close: under 1 m from the ground, a trunk or the crown above, or under 2 m from a building.")
+    lines.append("\n*Too close (edge to edge, from the TRUE track): under 1 m from the ground or a building, under 0.5 m "
+                 "from a trunk, the crown above or a wire band (negative: inside it).")
     (out / "summary.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 

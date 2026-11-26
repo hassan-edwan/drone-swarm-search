@@ -50,6 +50,16 @@ def record(sc, seed, steps):
         q_add(it)
 
     env.queue.add = add
+    under_out = {}  # (drone, step the check ended) -> did it get within sight of the spot
+    orig_under = env._under_look
+
+    def under_look(a):
+        n0 = env.n_under_blocked
+        r = orig_under(a)
+        under_out[(a, env.t)] = env.n_under_blocked == n0
+        return r
+
+    env._under_look = under_look
     while True:
         frames.append(dict(t=env.t, hour=env.hour(), people=env.people.pos.copy(), found=env.found.copy(),
                            drones={a: dict(cell=tuple(int(v) for v in env.true_pos[a]), alt_m=float(env.alt_now[a]),
@@ -59,6 +69,7 @@ def record(sc, seed, steps):
         if not env.agents or env.t >= steps:
             break
         env.step(pol.act(env))
+    env.under_outcomes = under_out
     return env, frames, alerts
 
 
@@ -73,9 +84,11 @@ def main():
     ap.add_argument("--test", default="demo", choices=["demo", "random", "none"],
                     help="planner test after the mission: the demo spot behind houses, a random spot under "
                          "trees in the detailed area, or none")
-    ap.add_argument("--test-target", type=float, nargs=2, default=(-140.5, 225.5))
-    ap.add_argument("--test-start", type=float, nargs=2, default=(-80.5, 285.5))
+    ap.add_argument("--test-target", type=float, nargs=2, default=(-149.5, 3.5))
+    ap.add_argument("--test-start", type=float, nargs=2, default=(-89.5, 63.5))
     ap.add_argument("--out-dir", default="", help="where to write (default: the site folder)")
+    ap.add_argument("--season", default="leaf-on", choices=["leaf-on", "leaf-off"])
+    ap.add_argument("--drone", default="sar", choices=list(f3.DRONES))
     ap.add_argument("--shift", type=float, nargs=2, default=(2000.0, 0.0),
                     help="add to the fine data's coordinates to put them in this site's frame")
     a = ap.parse_args()
@@ -89,8 +102,9 @@ def main():
     def cxy(c):
         return (c[0] + 0.5 - g / 2) * fam.cell_m, (g / 2 - c[1] - 0.5) * fam.cell_m
 
-    s3 = f3.Site3D.load(a.fine_from, shift=tuple(a.shift))
-    P = f3.Planner(s3, f3.CoarseTerrain(site / "lidar10.npz"))
+    hz = site / "hazards.json"
+    s3 = f3.Site3D.load(a.fine_from, shift=tuple(a.shift), hazards=hz, season=a.season)
+    P = f3.Planner(s3, f3.CoarseTerrain(site / "lidar10.npz", hazards=hz), drone=a.drone)
     # where the person really is inside their cell: somewhere under the crowns
     people_xy = []
     for i, pc in enumerate(frames[0]["people"]):
@@ -127,7 +141,29 @@ def main():
                     x0, y0 = cxy(cell)
                     tgt = (x0 + rng.uniform(-15, 15), y0 + rng.uniform(-15, 15))
                 start = cxy(a0["cell"])
+                # the simulator drew whether this check gets within sight of the spot (from the
+                # planner's success rate for the cell); place the spot where that matches
+                n_steps0 = 1
+                while k + n_steps0 < len(frames) - 1 and frames[k + n_steps0]["drones"].get(d, {}).get("mode") == "under":
+                    n_steps0 += 1
+                want_close = env.under_outcomes.get((d, frames[k + n_steps0]["t"]),
+                                                    next((v for (dd, tt), v in env.under_outcomes.items() if dd == d
+                                                          and tt >= f1["t"]), True))
                 tr, info = P.under_check(start, tgt, fam.alt_m[0], z0=z0)
+                if tr is not None and info["close_enough"] != want_close:
+                    x0, y0 = cxy(cell)
+                    for _ in range(40):
+                        cand = (x0 + rng.uniform(-0.45, 0.45) * fam.cell_m, y0 + rng.uniform(-0.45, 0.45) * fam.cell_m)
+                        ii, jj = s3.ij(*cand)
+                        if not s3.inside(*cand, 5) or s3.veg_top[ii, jj] < 8:
+                            continue
+                        tr2, info2 = P.under_check(start, cand, fam.alt_m[0], z0=z0)
+                        if tr2 is not None and info2["close_enough"] == want_close:
+                            tr, info = tr2, info2
+                            for i, pc in enumerate(f1["people"]):
+                                if tuple(int(v) for v in pc) == tuple(cell):
+                                    people_xy[i] = cand
+                            break
                 n_steps = 1
                 while k + n_steps < len(frames) - 1 and frames[k + n_steps]["drones"].get(d, {}).get("mode") == "under":
                     n_steps += 1
@@ -173,13 +209,13 @@ def main():
             trajs["test"] = [(t_end + t, x, y, z, m) for t, x, y, z, m in tr]
             test = dict(t=t_end, gap=tinfo["gap"], spot=tuple(a.test_target), look=tinfo["look"],
                         under_m=tinfo["under_m"], total_s=tinfo["total_s"], reach_m=tinfo["reach_m"])
-    clear = {d: f3.clearance(s3, tr) for d, tr in trajs.items()}
+    clear = {d: f3.clearance(s3, tr, drone=a.drone) for d, tr in trajs.items()}
     found_t = next((f["t"] for f in frames if f["found"].any()), None)
     info = dict(seed=a.seed, hour=a.hour, category=sc.category, n_drones=sc.n_drones, cell_m=fam.cell_m,
                 step_s=fam.step_s, base=cxy(env.w.base), people=people_xy, found_step=found_t, events=events,
                 alerts=alerts, clearance=clear, alt_m=list(fam.alt_m), fine=dict(east0=s3.east0, north0=s3.north0,
                                                                                     size=s3.n),
-                n_trees=len(s3.trees), policy="the rule (BeliefGreedy)", test=test)
+                n_trees=len(s3.trees), policy="the rule (BeliefGreedy)", test=test, season=a.season, drone=a.drone)
     od = Path(a.out_dir) if a.out_dir else site
     od.mkdir(parents=True, exist_ok=True)
     out = od / f"flight_seed{a.seed}.json"
