@@ -28,6 +28,7 @@ import argparse
 import itertools
 import json
 import math
+import multiprocessing
 import os
 import pickle
 import subprocess
@@ -662,7 +663,9 @@ def main():
                            "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "23",
                            "-preset", "medium", str(out)], stdin=subprocess.PIPE)
     t1 = time.time()
-    with ProcessPoolExecutor(a.workers, initializer=_init, initargs=(str(S), str(rp))) as ex:
+    # spawned, not forked: a scene built above for --still must not be inherited (PyBullet client 0)
+    with ProcessPoolExecutor(a.workers, mp_context=multiprocessing.get_context("spawn"), initializer=_init,
+                             initargs=(str(S), str(rp))) as ex:
         for n, (fi, fr) in enumerate(ex.map(make, jobs, chunksize=4)):
             ff.stdin.write(fr.tobytes())
             if n % 100 == 0:
