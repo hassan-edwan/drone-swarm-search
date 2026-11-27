@@ -1,0 +1,1 @@
+ff1d4daff8e1a88f454f328dbce9e248200d19b1 Thu Nov 26 16:24:01 2026 +0000 Realism evaluation with season, cloud, wind, birds and emergency landings; return reserve 12%; docs

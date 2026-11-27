@@ -1,0 +1,162 @@
+{
+  "m4_drift_unknown": {
+    "lawnmower": {
+      "2d": {
+        "reached_90": 0.4,
+        "found": 0.8100000000000002,
+        "t90": 182.1,
+        "coverage": 0.9831698984860797
+      },
+      "3d": {
+        "reached_90": 0.4,
+        "found": 0.8100000000000002,
+        "t90": 182.1,
+        "coverage": 0.9831698984860797,
+        "late": 0.0,
+        "track_err_m": 0.008706778759625614,
+        "near_misses": 0.0,
+        "obstacle_hits": 0.0,
+        "crashed": 0.0
+      }
+    },
+    "mappo": {
+      "2d": {
+        "reached_90": 0.6,
+        "found": 0.8699999999999999,
+        "t90": 162.3,
+        "coverage": 0.8114659188392432
+      },
+      "3d": {
+        "reached_90": 0.6,
+        "found": 0.8699999999999999,
+        "t90": 162.3,
+        "coverage": 0.8114659188392432,
+        "late": 0.0,
+        "track_err_m": 0.009884661675355707,
+        "near_misses": 0.0,
+        "obstacle_hits": 0.0,
+        "crashed": 0.0
+      }
+    }
+  },
+  "m4_to_safety_unknown": {
+    "lawnmower": {
+      "2d": {
+        "reached_90": 0.6,
+        "found": 0.8699999999999999,
+        "t90": 151.4,
+        "coverage": 0.9402927347493273
+      },
+      "3d": {
+        "reached_90": 0.6,
+        "found": 0.8699999999999999,
+        "t90": 151.4,
+        "coverage": 0.9402927347493273,
+        "late": 0.0,
+        "track_err_m": 0.008631802343950905,
+        "near_misses": 0.0,
+        "obstacle_hits": 0.0,
+        "crashed": 0.0
+      }
+    },
+    "mappo": {
+      "2d": {
+        "reached_90": 1.0,
+        "found": 0.99,
+        "t90": 106.0,
+        "coverage": 0.6662883699285578
+      },
+      "3d": {
+        "reached_90": 1.0,
+        "found": 0.99,
+        "t90": 106.0,
+        "coverage": 0.6662883699285578,
+        "late": 0.0,
+        "track_err_m": 0.00996043426964496,
+        "near_misses": 0.0,
+        "obstacle_hits": 0.0,
+        "crashed": 0.0
+      }
+    }
+  },
+  "m4_dense_wander": {
+    "lawnmower": {
+      "2d": {
+        "reached_90": 0.6,
+        "found": 0.8099999999999999,
+        "t90": 167.6,
+        "coverage": 0.8778234623448118
+      },
+      "3d": {
+        "reached_90": 0.6,
+        "found": 0.8099999999999999,
+        "t90": 167.6,
+        "coverage": 0.8778234623448118,
+        "late": 0.0,
+        "track_err_m": 0.008471940056338393,
+        "near_misses": 0.0,
+        "obstacle_hits": 0.0,
+        "crashed": 0.0
+      }
+    },
+    "mappo": {
+      "2d": {
+        "reached_90": 0.8,
+        "found": 0.9199999999999999,
+        "t90": 143.2,
+        "coverage": 0.9039503559311243
+      },
+      "3d": {
+        "reached_90": 0.8,
+        "found": 0.9199999999999999,
+        "t90": 143.2,
+        "coverage": 0.9039503559311243,
+        "late": 0.0,
+        "track_err_m": 0.009671365501622328,
+        "near_misses": 0.0,
+        "obstacle_hits": 0.0,
+        "crashed": 0.0
+      }
+    }
+  },
+  "m4_random_mix": {
+    "lawnmower": {
+      "2d": {
+        "reached_90": 0.6,
+        "found": 0.9023809523809524,
+        "t90": 135.3,
+        "coverage": 0.8896313170564524
+      },
+      "3d": {
+        "reached_90": 0.6,
+        "found": 0.9023809523809524,
+        "t90": 135.3,
+        "coverage": 0.8896313170564524,
+        "late": 0.0,
+        "track_err_m": 0.008680156107278418,
+        "near_misses": 0.0,
+        "obstacle_hits": 0.0,
+        "crashed": 0.0
+      }
+    },
+    "mappo": {
+      "2d": {
+        "reached_90": 0.7,
+        "found": 0.9214285714285715,
+        "t90": 110.9,
+        "coverage": 0.8259702508675233
+      },
+      "3d": {
+        "reached_90": 0.7,
+        "found": 0.9214285714285715,
+        "t90": 110.9,
+        "coverage": 0.8259702508675233,
+        "late": 0.0,
+        "track_err_m": 0.010154673546701808,
+        "near_misses": 0.0,
+        "obstacle_hits": 0.0,
+        "crashed": 0.0
+      }
+    }
+  }
+}

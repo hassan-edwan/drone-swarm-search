@@ -1,0 +1,19 @@
+Loading python/gcc/11.3.0/nocuda/linux-rhel8-zen2/3.10.10
+  Loading requirement: gcc/11.3.0
+........................................................................ [ 76%]
+......................                                                   [100%]
+=============================== warnings summary ===============================
+tests/test_checkpoint.py::test_resume
+  /home/hedwan/drone-swarm-search/swarmsearch/mappo.py:571: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+  Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+    avg("collisions"), float(pl), float(vl), float(ent), round(time.time() - t0),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+94 passed, 1 warning in 148.30s (0:02:28)
+usage: imitate.py [-h] [--obstacles OBSTACLES] [--episodes EPISODES]
+                  [--betas [BETAS ...]] [--epochs EPOCHS] [--workers WORKERS]
+                  [--seed SEED] [--team] [--camera] [--real]
+                  [--expand-share EXPAND_SHARE] [--long-share LONG_SHARE]
+                  [--field [FAMILY ...]] [--arch {mlp,cnn}] [--plan-feats]
+                  [--every EVERY] [--hard-labels] [--out OUT]
+imitate.py: error: argument --arch: invalid choice: 'x86_64' (choose from 'mlp', 'cnn')

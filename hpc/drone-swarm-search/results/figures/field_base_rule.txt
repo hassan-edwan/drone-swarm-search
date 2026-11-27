@@ -1,0 +1,21 @@
+06:47  (min   0.0)  launch: 4 drones, hiker lost 9.8 h ago, dusk, 7 C, wind 9 m/s; person is signals, behaviour 'none'
+07:08  (min  20.2)  drone_3: low battery: home (battery 32%)
+07:08  (min  20.8)  drone_1: low battery: home (battery 31%)
+07:10  (min  23.0)  drone_0: low battery: home (battery 25%)
+07:11  (min  23.3)  drone_2: low battery: home (battery 22%)
+07:13  (min  25.7)  drone_3: battery swap (battery 15%)
+07:14  (min  26.3)  drone_1: battery swap (battery 15%)
+07:14  (min  26.9)  drone_0: battery swap (battery 13%)
+07:15  (min  27.5)  drone_2: battery swap (battery 10%)
+07:36  (min  48.9)  drone_0: low battery: home (battery 37%)
+07:37  (min  49.8)  operator confirms a find -> ground team dispatched
+07:39  (min  52.0)  drone_3: low battery: home (battery 21%)
+07:40  (min  52.9)  drone_1: low battery: home (battery 21%)
+07:40  (min  53.2)  drone_2: low battery: home (battery 25%)
+07:42  (min  55.0)  drone_3: battery swap (battery 12%)
+07:43  (min  55.6)  drone_0: battery swap (battery 17%)
+07:43  (min  56.2)  drone_1: battery swap (battery 11%)
+07:44  (min  57.1)  drone_2: battery swap (battery 13%)
+08:05  (min  77.3)  drone_3: low battery: home (battery 37%)
+08:07  (min  79.4)  ground team reaches the person: rescued
+08:07  (min  79.4)  end: found 100%, rescued 100%, 6 alerts (5 false), 8 battery swaps, area covered 6%

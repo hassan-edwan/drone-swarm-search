@@ -1,0 +1,45 @@
+Loading python/gcc/11.3.0/nocuda/linux-rhel8-zen2/3.10.10
+  Loading requirement: gcc/11.3.0
+settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 1 2 RL_STEPS=100000000 N_ENVS=128 CPUS=64 RUN=runs/phase2
+concurrent.futures.process._RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/concurrent/futures/process.py", line 246, in _process_worker
+    r = call_item.fn(*call_item.args, **call_item.kwargs)
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/concurrent/futures/process.py", line 205, in _process_chunk
+    return [fn(*args) for args in chunk]
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/concurrent/futures/process.py", line 205, in <listcomp>
+    return [fn(*args) for args in chunk]
+  File "/home/hedwan/drone-swarm-search-p4/scripts/paired_eval.py", line 69, in one
+    m = run_episode(env, pol, sc, seed)
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/evaluate.py", line 221, in run_episode
+    env.reset(seed=seed, options={"scenario": scenario})
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/field/env.py", line 205, in reset
+    w = make_world(np.random.default_rng(sc.seed_world), sc)
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/field/terrain.py", line 345, in make_world
+    _hazards(w, sc, rng)
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/field/terrain.py", line 353, in _hazards
+    from . import hazards
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/field/hazards.py", line 46, in <module>
+    from scipy import ndimage
+ModuleNotFoundError: No module named 'scipy'
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/hedwan/drone-swarm-search-p4/scripts/paired_eval.py", line 106, in <module>
+    main()
+  File "/home/hedwan/drone-swarm-search-p4/scripts/paired_eval.py", line 85, in main
+    rows = list(ex.map(one, jobs, chunksize=1))
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/concurrent/futures/process.py", line 570, in _chain_from_iterable_of_lists
+    for element in iterable:
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/concurrent/futures/_base.py", line 621, in result_iterator
+    yield _result_or_cancel(fs.pop())
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/concurrent/futures/_base.py", line 319, in _result_or_cancel
+    return fut.result(timeout)
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/concurrent/futures/_base.py", line 458, in result
+    return self.__get_result()
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+ModuleNotFoundError: No module named 'scipy'

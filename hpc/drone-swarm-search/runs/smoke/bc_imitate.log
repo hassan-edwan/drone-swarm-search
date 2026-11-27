@@ -1,0 +1,13 @@
+round 0 beta 1.0: 23990 samples, rollout find time 45% of budget, found 72% (20s)
+  epoch 1/4 loss 1.959 agreement 0.297 (same action 0.293)
+  epoch 2/4 loss 1.819 agreement 0.360 (same action 0.352)
+  epoch 3/4 loss 1.762 agreement 0.383 (same action 0.369)
+  epoch 4/4 loss 1.712 agreement 0.402 (same action 0.389)
+round 0: fit on 23990 samples, agreement 40.2% (1.14 equally good actions per state)
+round 1 beta 0.0: 17747 samples, rollout find time 88% of budget, found 37% (44s)
+  epoch 1/4 loss 1.663 agreement 0.441 (same action 0.435)
+  epoch 2/4 loss 1.497 agreement 0.499 (same action 0.491)
+  epoch 3/4 loss 1.377 agreement 0.536 (same action 0.527)
+  epoch 4/4 loss 1.269 agreement 0.572 (same action 0.562)
+round 1: fit on 41737 samples, agreement 57.2% (1.16 equally good actions per state)
+clone alone: find time 90% of budget, found 23%

@@ -1,0 +1,4 @@
+Loading python/gcc/11.3.0/nocuda/linux-rhel8-zen2/3.10.10
+  Loading requirement: gcc/11.3.0
+settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 1 2 RL_STEPS=100000000 N_ENVS=128 CPUS=64 RUN=runs/phase2
+[2026-11-23T13:10:36.308] error: *** JOB 24222040 ON compute-b8-15 CANCELLED AT 2026-11-23T13:10:36 DUE to SIGNAL Terminated ***

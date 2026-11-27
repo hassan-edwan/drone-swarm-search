@@ -1,0 +1,9 @@
+Loading python/gcc/11.3.0/nocuda/linux-rhel8-zen2/3.10.10
+  Loading requirement: gcc/11.3.0
+settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 1 2 RL_STEPS=100000000 N_ENVS=128 CPUS=128 RUN=runs/phase2
+| wild_hard_off_model | rl_seed1_best_T0 | 325 ± 19 | 32% | 66% | 29% | 31% | 348 | 10% | 18 (18) | 0.1 | 0.09 | 0.95 |
+| wild_hard_off_model | rl_seed2_best | 323 ± 18 | 34% | 68% | 28% | 32% | 351 | 11% | 18 (18) | 0.1 | 0.07 | 0.95 |
+| wild_hard_off_model | rl_seed2_best_T0 | 326 ± 19 | 34% | 68% | 28% | 32% | 352 | 10% | 19 (19) | 0.1 | 0.06 | 0.95 |
+| flood_night_heldout | rl_seed1_best_T0 | 453 ± 9 | 36% | 44% | 29% | 25% | 526 | 82% | 68 (62) | 0.9 | 0.02 | 0.99 |
+| flood_night_heldout | rl_seed2_best | 449 ± 8 | 39% | 47% | 28% | 26% | 522 | 84% | 68 (61) | 0.7 | 0.03 | 0.99 |
+| flood_night_heldout | rl_seed2_best_T0 | 450 ± 8 | 37% | 45% | 27% | 24% | 528 | 82% | 67 (61) | 0.8 | 0.03 | 0.99 |

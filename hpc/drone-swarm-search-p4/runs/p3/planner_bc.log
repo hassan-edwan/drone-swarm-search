@@ -1,0 +1,12 @@
+round 0 beta 1.0: 8986 labels, found 0.43, planner changed the rule's choice 50%
+  epoch 1/4 loss 3.646 agreement 0.455
+  epoch 2/4 loss 3.466 agreement 0.416
+  epoch 3/4 loss 3.343 agreement 0.379
+  epoch 4/4 loss 3.231 agreement 0.377
+round 0: agreement with the planner 37.7%
+round 1 beta 0.5: 17130 labels, found 0.47, planner changed the rule's choice 58%
+  epoch 1/4 loss 3.218 agreement 0.343
+  epoch 2/4 loss 3.112 agreement 0.339
+  epoch 3/4 loss 3.023 agreement 0.340
+  epoch 4/4 loss 2.971 agreement 0.338
+round 1: agreement with the planner 33.8%

@@ -1,0 +1,41 @@
+Loading python/gcc/11.3.0/nocuda/linux-rhel8-zen2/3.10.10
+  Loading requirement: gcc/11.3.0
+settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 1 2 RL_STEPS=100000000 N_ENVS=128 CPUS=16 RUN=runs/phase2
+........................................................................ [ 76%]
+......................                                                   [100%]
+=============================== warnings summary ===============================
+tests/test_checkpoint.py::test_resume
+  /home/hedwan/drone-swarm-search/swarmsearch/mappo.py:571: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+  Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+    avg("collisions"), float(pl), float(vl), float(ent), round(time.time() - t0),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+94 passed, 1 warning in 149.50s (0:02:29)
+settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 RL_STEPS=8192 N_ENVS=4 CPUS=16 RUN=runs/smoke
+settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 RL_STEPS=8192 N_ENVS=4 CPUS=16 RUN=runs/smoke
+round 0 beta 1.0: 23990 samples, rollout find time 45% of budget, found 72% (20s)
+  epoch 1/4 loss 1.959 agreement 0.297 (same action 0.293)
+  epoch 2/4 loss 1.819 agreement 0.360 (same action 0.352)
+  epoch 3/4 loss 1.762 agreement 0.383 (same action 0.369)
+  epoch 4/4 loss 1.712 agreement 0.402 (same action 0.389)
+round 0: fit on 23990 samples, agreement 40.2% (1.14 equally good actions per state)
+round 1 beta 0.0: 17747 samples, rollout find time 88% of budget, found 37% (44s)
+  epoch 1/4 loss 1.663 agreement 0.441 (same action 0.435)
+  epoch 2/4 loss 1.497 agreement 0.499 (same action 0.491)
+  epoch 3/4 loss 1.377 agreement 0.536 (same action 0.527)
+  epoch 4/4 loss 1.269 agreement 0.572 (same action 0.562)
+round 1: fit on 41737 samples, agreement 57.2% (1.16 equally good actions per state)
+clone alone: find time 90% of budget, found 23%
+scaled actor.4 by 4.0: runs/smoke/bc_sharp.pt
+settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 RL_STEPS=8192 N_ENVS=4 CPUS=16 RUN=runs/smoke
+| wild_hard_off_model | bc_T0 | 174 ± 88 | 50% | 50% | 50% | 50% | 190 | 0% | 4 (3) | 0.0 | 0.00 | 0.99 |
+| wild_hard_off_model | model | 298 ± 0 | 0% | 0% | 0% | 0% | 298 | 1% | 4 (4) | 0.0 | 0.50 | 0.80 |
+| wild_hard_off_model | model_T0 | 174 ± 88 | 50% | 50% | 50% | 50% | 190 | 0% | 4 (3) | 0.0 | 0.00 | 0.99 |
+| flood_night_heldout | bc_T0 | 498 ± 35 | 37% | 56% | 19% | 11% | 575 | 83% | 50 (44) | 0.0 | 0.00 | 1.00 |
+| flood_night_heldout | model | 469 ± 7 | 30% | 48% | 22% | 7% | 564 | 77% | 60 (53) | 0.5 | 0.00 | 1.00 |
+| flood_night_heldout | model_T0 | 498 ± 35 | 37% | 56% | 19% | 11% | 575 | 83% | 50 (44) | 0.0 | 0.00 | 1.00 |
+results_field.json
+results_field.md
+results_missions.json
+results_missions.md
+speed on 16 cores: 509 steps/s

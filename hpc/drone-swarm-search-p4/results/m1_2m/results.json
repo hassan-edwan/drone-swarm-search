@@ -1,0 +1,306 @@
+{
+  "default": {
+    "lawnmower": {
+      "time_to_90": 179.28,
+      "time_to_90_std": 35.11412251502236,
+      "reached_90": 0.34,
+      "found_frac": 0.8079999999999999,
+      "coverage": 0.9993000000000001,
+      "repeat_frac": 0.0032602392566726877,
+      "collisions": 0.0
+    },
+    "random": {
+      "time_to_90": 194.82,
+      "time_to_90_std": 25.376910765497048,
+      "reached_90": 0.04,
+      "found_frac": 0.45399999999999996,
+      "coverage": 0.45994999999999997,
+      "repeat_frac": 0.3530440589843575,
+      "collisions": 5.14
+    },
+    "mappo": {
+      "time_to_90": 170.52,
+      "time_to_90_std": 43.37291320628579,
+      "reached_90": 0.42,
+      "found_frac": 0.81,
+      "coverage": 0.89805,
+      "repeat_frac": 0.003737697038352859,
+      "collisions": 0.52
+    },
+    "ippo": {
+      "time_to_90": 177.44,
+      "time_to_90_std": 34.81388228853541,
+      "reached_90": 0.46,
+      "found_frac": 0.8220000000000002,
+      "coverage": 0.8747499999999999,
+      "repeat_frac": 0.009891213977981187,
+      "collisions": 0.04
+    }
+  },
+  "no_zones": {
+    "lawnmower": {
+      "time_to_90": 181.88,
+      "time_to_90_std": 27.16883508728337,
+      "reached_90": 0.38,
+      "found_frac": 0.8240000000000002,
+      "coverage": 0.998,
+      "repeat_frac": 0.0031612008139665104,
+      "collisions": 0.0
+    },
+    "random": {
+      "time_to_90": 200.0,
+      "time_to_90_std": 0.0,
+      "reached_90": 0.0,
+      "found_frac": 0.4200000000000001,
+      "coverage": 0.46549999999999997,
+      "repeat_frac": 0.3502155887230514,
+      "collisions": 3.8
+    },
+    "mappo": {
+      "time_to_90": 182.04,
+      "time_to_90_std": 30.72260405629705,
+      "reached_90": 0.4,
+      "found_frac": 0.814,
+      "coverage": 0.8993500000000002,
+      "repeat_frac": 0.0028736509952769084,
+      "collisions": 0.0
+    },
+    "ippo": {
+      "time_to_90": 189.64,
+      "time_to_90_std": 19.461510732725763,
+      "reached_90": 0.34,
+      "found_frac": 0.7959999999999999,
+      "coverage": 0.9074999999999999,
+      "repeat_frac": 0.005730162730526764,
+      "collisions": 0.64
+    }
+  },
+  "still": {
+    "lawnmower": {
+      "time_to_90": 161.46,
+      "time_to_90_std": 37.95745513071181,
+      "reached_90": 0.66,
+      "found_frac": 0.8779999999999998,
+      "coverage": 0.9818000000000001,
+      "repeat_frac": 0.002732784166598701,
+      "collisions": 0.0
+    },
+    "random": {
+      "time_to_90": 198.26,
+      "time_to_90_std": 10.482003625261731,
+      "reached_90": 0.04,
+      "found_frac": 0.44199999999999995,
+      "coverage": 0.46395,
+      "repeat_frac": 0.3515422885572139,
+      "collisions": 4.1
+    },
+    "mappo": {
+      "time_to_90": 158.52,
+      "time_to_90_std": 42.23517017841885,
+      "reached_90": 0.66,
+      "found_frac": 0.884,
+      "coverage": 0.8643000000000001,
+      "repeat_frac": 0.00504498445293037,
+      "collisions": 0.28
+    },
+    "ippo": {
+      "time_to_90": 159.8,
+      "time_to_90_std": 42.30177301248732,
+      "reached_90": 0.6,
+      "found_frac": 0.85,
+      "coverage": 0.8772999999999999,
+      "repeat_frac": 0.009621589599968644,
+      "collisions": 0.36
+    }
+  },
+  "drift_known": {
+    "lawnmower": {
+      "time_to_90": 175.52,
+      "time_to_90_std": 32.29008516557366,
+      "reached_90": 0.56,
+      "found_frac": 0.8460000000000002,
+      "coverage": 0.9940000000000001,
+      "repeat_frac": 0.0016143923408652133,
+      "collisions": 0.0
+    },
+    "random": {
+      "time_to_90": 200.0,
+      "time_to_90_std": 0.0,
+      "reached_90": 0.0,
+      "found_frac": 0.36,
+      "coverage": 0.46409999999999996,
+      "repeat_frac": 0.2361525704809287,
+      "collisions": 4.56
+    },
+    "mappo": {
+      "time_to_90": 176.58,
+      "time_to_90_std": 47.04554814219939,
+      "reached_90": 0.22,
+      "found_frac": 0.7680000000000001,
+      "coverage": 0.8164500000000001,
+      "repeat_frac": 0.0032831847293236004,
+      "collisions": 0.68
+    },
+    "ippo": {
+      "time_to_90": 181.2,
+      "time_to_90_std": 34.13092439416196,
+      "reached_90": 0.38,
+      "found_frac": 0.7599999999999999,
+      "coverage": 0.82025,
+      "repeat_frac": 0.005832406072445735,
+      "collisions": 0.0
+    }
+  },
+  "drift_default": {
+    "lawnmower": {
+      "time_to_90": 175.52,
+      "time_to_90_std": 32.29008516557366,
+      "reached_90": 0.56,
+      "found_frac": 0.8460000000000002,
+      "coverage": 0.9940000000000001,
+      "repeat_frac": 0.0032287846817304266,
+      "collisions": 0.0
+    },
+    "random": {
+      "time_to_90": 199.62,
+      "time_to_90_std": 2.66,
+      "reached_90": 0.04,
+      "found_frac": 0.34,
+      "coverage": 0.45089999999999997,
+      "repeat_frac": 0.3562189054726368,
+      "collisions": 4.4
+    },
+    "mappo": {
+      "time_to_90": 181.94,
+      "time_to_90_std": 33.27065373568725,
+      "reached_90": 0.3,
+      "found_frac": 0.774,
+      "coverage": 0.8899999999999999,
+      "repeat_frac": 0.004790451706560816,
+      "collisions": 0.28
+    },
+    "ippo": {
+      "time_to_90": 174.8,
+      "time_to_90_std": 41.54130474599949,
+      "reached_90": 0.4,
+      "found_frac": 0.7999999999999998,
+      "coverage": 0.8803,
+      "repeat_frac": 0.008943533074847054,
+      "collisions": 0.12
+    }
+  },
+  "drone_lost": {
+    "lawnmower": {
+      "time_to_90": 187.06,
+      "time_to_90_std": 26.80552928035557,
+      "reached_90": 0.28,
+      "found_frac": 0.7499999999999999,
+      "coverage": 0.90935,
+      "repeat_frac": 0.0025710544469237213,
+      "collisions": 0.0
+    },
+    "random": {
+      "time_to_90": 195.5,
+      "time_to_90_std": 16.917742166140254,
+      "reached_90": 0.08,
+      "found_frac": 0.444,
+      "coverage": 0.41369999999999996,
+      "repeat_frac": 0.3493867535623054,
+      "collisions": 3.64
+    },
+    "mappo": {
+      "time_to_90": 181.32,
+      "time_to_90_std": 34.35080202848254,
+      "reached_90": 0.32,
+      "found_frac": 0.8019999999999999,
+      "coverage": 0.8162499999999998,
+      "repeat_frac": 0.0039598848277623356,
+      "collisions": 0.0
+    },
+    "ippo": {
+      "time_to_90": 183.2,
+      "time_to_90_std": 28.79097080683456,
+      "reached_90": 0.34,
+      "found_frac": 0.774,
+      "coverage": 0.8062999999999999,
+      "repeat_frac": 0.009919116650512767,
+      "collisions": 0.48
+    }
+  },
+  "6_drones": {
+    "lawnmower": {
+      "time_to_90": 113.6,
+      "time_to_90_std": 40.749478524270714,
+      "reached_90": 0.96,
+      "found_frac": 0.97,
+      "coverage": 0.9972,
+      "repeat_frac": 0.013301084335060765,
+      "collisions": 0.0
+    },
+    "random": {
+      "time_to_90": 190.32,
+      "time_to_90_std": 29.775452977242846,
+      "reached_90": 0.14,
+      "found_frac": 0.664,
+      "coverage": 0.6517499999999999,
+      "repeat_frac": 0.38535718841689,
+      "collisions": 20.76
+    },
+    "mappo": {
+      "time_to_90": 99.36,
+      "time_to_90_std": 39.53264979735105,
+      "reached_90": 0.98,
+      "found_frac": 0.9740000000000001,
+      "coverage": 0.9606999999999999,
+      "repeat_frac": 0.0119274666722083,
+      "collisions": 1.28
+    },
+    "ippo": {
+      "time_to_90": 110.04,
+      "time_to_90_std": 44.144290684073745,
+      "reached_90": 0.96,
+      "found_frac": 0.9660000000000001,
+      "coverage": 0.9637500000000001,
+      "repeat_frac": 0.019089865154513223,
+      "collisions": 1.28
+    }
+  },
+  "random_mix": {
+    "lawnmower": {
+      "time_to_90": 148.5,
+      "time_to_90_std": 52.58792637098367,
+      "reached_90": 0.68,
+      "found_frac": 0.8827908121290474,
+      "coverage": 0.97485,
+      "repeat_frac": 0.04066403287420636,
+      "collisions": 1.44
+    },
+    "random": {
+      "time_to_90": 194.06,
+      "time_to_90_std": 22.146250246937964,
+      "reached_90": 0.08,
+      "found_frac": 0.5092415497299397,
+      "coverage": 0.5506,
+      "repeat_frac": 0.42510385328972694,
+      "collisions": 14.52
+    },
+    "mappo": {
+      "time_to_90": 144.34,
+      "time_to_90_std": 59.45371645238,
+      "reached_90": 0.56,
+      "found_frac": 0.8717255914020621,
+      "coverage": 0.8834000000000001,
+      "repeat_frac": 0.06312322093483598,
+      "collisions": 0.56
+    },
+    "ippo": {
+      "time_to_90": 145.28,
+      "time_to_90_std": 59.37879756276646,
+      "reached_90": 0.58,
+      "found_frac": 0.866073513088219,
+      "coverage": 0.8639500000000001,
+      "repeat_frac": 0.06667434484973683,
+      "collisions": 1.2
+    }
+  }
+}

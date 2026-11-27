@@ -1,0 +1,43 @@
+Loading python/gcc/11.3.0/nocuda/linux-rhel8-zen2/3.10.10
+  Loading requirement: gcc/11.3.0
+settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 1 2 RL_STEPS=100000000 N_ENVS=128 CPUS=64 RUN=runs/phase2
+8 members in runs/realism/pbt
+pbt: nothing to compare yet
+multiprocessing.pool.RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/multiprocessing/pool.py", line 125, in worker
+    result = (True, func(*args, **kwds))
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/multiprocessing/pool.py", line 48, in mapstar
+    return list(map(*args))
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/targets_train.py", line 85, in run_mission
+    env.reset(seed=seed)
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/field/env.py", line 205, in reset
+    w = make_world(np.random.default_rng(sc.seed_world), sc)
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/field/terrain.py", line 345, in make_world
+    _hazards(w, sc, rng)
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/field/terrain.py", line 353, in _hazards
+    from . import hazards
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/field/hazards.py", line 46, in <module>
+    from scipy import ndimage
+ModuleNotFoundError: No module named 'scipy'
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/hedwan/drone-swarm-search-p4/scripts/train_targets.py", line 41, in <module>
+    main()
+  File "/home/hedwan/drone-swarm-search-p4/scripts/train_targets.py", line 37, in main
+    train(cfg, a.out, init=a.init, resume=a.resume)
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/targets_train.py", line 328, in train
+    base = rule_baseline(pool, cfg, out_dir)
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/targets_train.py", line 273, in rule_baseline
+    per = validate(pool, tg.TargetNet(cfg.width, cfg.beta), cfg)["per"]
+  File "/home/hedwan/drone-swarm-search-p4/swarmsearch/targets_train.py", line 254, in validate
+    res = pool.map(run_mission, jobs) if pool else list(map(run_mission, jobs))
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/multiprocessing/pool.py", line 367, in map
+    return self._map_async(func, iterable, mapstar, chunksize).get()
+  File "/cvmfs/hpcsw.umd.edu/spack-software/2023.11.20/views/2023/linux-rhel8-zen2/gcc@11.3.0/python-3.10.10/._mpi-nocuda/qd63fn2w5jnqtlfannzt4ilfsbb2xx7q/linux-rhel8-zen2/gcc/11.3.0/lib/python3.10/multiprocessing/pool.py", line 774, in get
+    raise self._value
+ModuleNotFoundError: No module named 'scipy'

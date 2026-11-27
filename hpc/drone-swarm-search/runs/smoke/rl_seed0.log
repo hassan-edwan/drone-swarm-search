@@ -1,0 +1,13 @@
+no checkpoint at runs/smoke/rl_seed0/ckpt.pt: starting from scratch
+/home/hedwan/drone-swarm-search/swarmsearch/mappo.py:571: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  avg("collisions"), float(pl), float(vl), float(ent), round(time.time() - t0),
+[mappo] upd 4/16 steps 2048 eps 2 found 0.00 t90 1100 cov 0.01 rep 0.44 coll 0.00 ent 0.34 8s
+[mappo] upd 6/16 steps 3072 eps 1 found 0.00 t90 1100 cov 0.01 rep 0.46 coll 0.00 ent 0.00 12s
+[mappo] upd 8/16 steps 4096 eps 2 found 0.55 t90 1100 cov 0.51 rep 0.12 coll 0.00 ent 0.14 17s
+[mappo] upd 9/16 steps 4608 eps 1 found 0.00 t90 1100 cov 0.13 rep 0.18 coll 0.00 ent 1.56 20s
+[mappo] upd 10/16 steps 5120 eps 2 found 0.00 t90 1100 cov 0.02 rep 0.28 coll 0.00 ent 0.46 23s
+[mappo] upd 11/16 steps 5632 eps 1 found 1.00 t90 58 cov 0.01 rep 0.15 coll 0.00 ent 0.31 26s
+[mappo] upd 12/16 steps 6144 eps 1 found 0.00 t90 1100 cov 0.02 rep 0.07 coll 0.00 ent 0.52 28s
+[mappo] upd 13/16 steps 6656 eps 1 found 1.00 t90 432 cov 0.90 rep 0.12 coll 0.00 ent 0.34 31s
+[mappo] upd 16/16 steps 8192 eps 1 found 1.00 t90 484 cov 0.01 rep 0.46 coll 0.00 ent 0.40 38s

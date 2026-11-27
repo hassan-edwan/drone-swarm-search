@@ -1,0 +1,29 @@
+Loading python/gcc/11.3.0/nocuda/linux-rhel8-zen2/3.10.10
+  Loading requirement: gcc/11.3.0
+settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 1 2 RL_STEPS=100000000 N_ENVS=128 CPUS=32 RUN=runs/phase2
+round 0 beta 1.0: 5087301 samples, rollout find time 60% of budget, found 54% (1258s)
+  epoch 1/4 loss 1.188 agreement 0.611 (same action 0.597)
+  epoch 2/4 loss 1.042 agreement 0.657 (same action 0.643)
+  epoch 3/4 loss 0.995 agreement 0.672 (same action 0.658)
+  epoch 4/4 loss 0.966 agreement 0.681 (same action 0.667)
+round 0: fit on 5087301 samples, agreement 68.1% (1.13 equally good actions per state)
+round 1 beta 0.5: 4955036 samples, rollout find time 62% of budget, found 53% (2763s)
+  epoch 1/4 loss 1.123 agreement 0.630 (same action 0.615)
+  epoch 2/4 loss 1.095 agreement 0.637 (same action 0.622)
+  epoch 3/4 loss 1.077 agreement 0.642 (same action 0.627)
+  epoch 4/4 loss 1.064 agreement 0.645 (same action 0.630)
+round 1: fit on 10042337 samples, agreement 64.5% (1.17 equally good actions per state)
+round 2 beta 0.25: 4999199 samples, rollout find time 62% of budget, found 53% (4517s)
+  epoch 1/4 loss 1.178 agreement 0.600 (same action 0.585)
+  epoch 2/4 loss 1.164 agreement 0.604 (same action 0.589)
+  epoch 3/4 loss 1.154 agreement 0.606 (same action 0.591)
+  epoch 4/4 loss 1.147 agreement 0.608 (same action 0.593)
+round 2: fit on 15041536 samples, agreement 60.8% (1.21 equally good actions per state)
+round 3 beta 0.0: 4841872 samples, rollout find time 64% of budget, found 50% (6356s)
+  epoch 1/4 loss 1.221 agreement 0.571 (same action 0.556)
+  epoch 2/4 loss 1.211 agreement 0.574 (same action 0.559)
+  epoch 3/4 loss 1.204 agreement 0.575 (same action 0.560)
+  epoch 4/4 loss 1.199 agreement 0.577 (same action 0.562)
+round 3: fit on 19883408 samples, agreement 57.7% (1.24 equally good actions per state)
+clone alone: find time 70% of budget, found 43%
+scaled actor.4 by 4.0: runs/phase2/bc_sharp.pt
