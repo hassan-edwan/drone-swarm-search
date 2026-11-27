@@ -23,6 +23,7 @@ def main():
     for k in ("lr", "gamma", "lam", "clip", "ent_coef", "kl_rule", "vf_coef", "keep", "temperature", "beta",
               "expand_share", "long_share", "reward_scale"):
         p.add_argument("--" + k.replace("_", "-"), type=float, default=getattr(d, k))
+    p.add_argument("--adv-by-family", type=int, default=1, help="1: normalise advantages within each family")
     p.add_argument("--init", default=None, help="start from a saved target policy (e.g. one trained to imitate the planner)")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--threads", type=int, default=4, help="learner threads")
@@ -31,6 +32,7 @@ def main():
     import torch
     torch.set_num_threads(a.threads)
     kw = {k: getattr(a, k) for k in TConfig.__dataclass_fields__ if hasattr(a, k) and k != "families"}
+    kw["adv_by_family"] = bool(a.adv_by_family)
     cfg = TConfig(families=tuple(a.field), **kw)
     train(cfg, a.out, init=a.init, resume=a.resume)
 

@@ -50,6 +50,7 @@ class TConfig:
     seed: int = 0
     val_every: int = 10
     val_episodes: int = 8
+    adv_by_family: bool = True  # normalise advantages within each family (urban pays far more finds)
     extra: dict = field(default_factory=dict)
 
 
@@ -79,6 +80,8 @@ def run_mission(args):
         if rec is not None:
             rec.reward({a: r * cfg.reward_scale for a, r in rew.items()}, t)
     samples = rec.finish(env.t) if rec is not None else []
+    for s in samples:
+        s["fam"] = env.fam.name
     m = env.metrics()
     return samples, dict(found=float(m.get("found_frac", 0.0)), family=env.fam.name, decisions=len(samples))
 
@@ -98,8 +101,16 @@ def _batches(samples, size, rng):
 
 
 def ppo_update(net, opt, samples, cfg: TConfig, rng, critic_only=False) -> dict:
+    # advantage scale: per family, so that the family paying the most finds (urban) does not set the
+    # direction of every update and drown the other one
+    norm = {}
+    if cfg.adv_by_family:
+        for f in {s.get("fam") for s in samples}:
+            a_ = np.array([s["adv"] for s in samples if s.get("fam") == f])
+            norm[f] = (a_.mean(), a_.std() + 1e-8)
     adv = np.array([s["adv"] for s in samples])
-    mu, sd = adv.mean(), adv.std() + 1e-8
+    glob = (adv.mean(), adv.std() + 1e-8)
+    scale = lambda s: norm.get(s.get("fam"), glob)  # noqa: E731
     stats = dict(pl=[], vl=[], ent=[], kl=[])
     for _ in range(cfg.epochs):
         for mb in _batches(samples, cfg.minibatch, rng):
@@ -108,7 +119,7 @@ def ppo_update(net, opt, samples, cfg: TConfig, rng, critic_only=False) -> dict:
             M = torch.from_numpy(np.stack([s["mask"] for s in mb]))
             A = torch.tensor([s["idx"] for s in mb])
             old = torch.tensor([s["logp"] for s in mb])
-            ADV = torch.tensor([(s["adv"] - mu) / sd for s in mb], dtype=torch.float32)
+            ADV = torch.tensor([(s["adv"] - scale(s)[0]) / scale(s)[1] for s in mb], dtype=torch.float32)
             RET = torch.tensor([s["ret"] for s in mb], dtype=torch.float32)
             logits, prior, v = net(X, torch.ones(len(mb), 1, g, g), M)
             lp = torch.log_softmax(logits, 1)
@@ -136,17 +147,37 @@ def ppo_update(net, opt, samples, cfg: TConfig, rng, critic_only=False) -> dict:
 VAL_SEED = 90_000
 
 
-def validate(pool, net, cfg: TConfig) -> dict:
-    """Greedy on fixed missions per family (the same every time)."""
-    out = {}
+def validate(pool, net, cfg: TConfig, base: dict | None = None) -> dict:
+    """Greedy on fixed missions per family (the same every time). With `base` (the rule's per-mission
+    results on the same missions), also the paired difference from the rule and its standard error:
+    luck that helps or hurts both on a mission cancels out."""
+    out, per = {}, {}
     state = {k: v.detach().clone() for k, v in net.state_dict().items()}
     for f in cfg.families:
         c = TConfig(**{**asdict(cfg), "families": (f,), "expand_share": 0.0, "long_share": 0.0})
         jobs = [(state, c, VAL_SEED + i, 0.0, False) for i in range(cfg.val_episodes)]
         res = pool.map(run_mission, jobs) if pool else list(map(run_mission, jobs))
-        out[f] = float(np.mean([m["found"] for _, m in res]))
-    out["score"] = float(np.mean(list(out.values())))
+        per[f] = [m["found"] for _, m in res]
+        out[f] = float(np.mean(per[f]))
+    out["score"] = float(np.mean([out[f] for f in cfg.families]))
+    if base is not None:
+        # score difference per mission index: the mean over families of (policy - rule) on that mission
+        d = np.mean([np.array(per[f]) - np.array(base[f]) for f in cfg.families], axis=0)
+        out["vs_rule"] = float(d.mean())
+        out["vs_rule_se"] = float(d.std(ddof=1) / np.sqrt(len(d))) if len(d) > 1 else float("nan")
+    out["per"] = per
     return out
+
+
+def rule_baseline(pool, cfg: TConfig, out_dir: str) -> dict:
+    """The rule's per-mission validation results (an untrained net is exactly the rule), cached."""
+    import json
+    path = os.path.join(out_dir, f"rule_val_{cfg.val_episodes}.json")
+    if os.path.exists(path):
+        return json.load(open(path))
+    per = validate(pool, tg.TargetNet(cfg.width, cfg.beta), cfg)["per"]
+    json.dump(per, open(path, "w"))
+    return per
 
 
 def train(cfg: TConfig, out_dir: str, init: str | None = None, resume: bool = False, log=print):
@@ -176,18 +207,29 @@ def train(cfg: TConfig, out_dir: str, init: str | None = None, resume: bool = Fa
     vf = open(os.path.join(out_dir, "val_log.csv"), "w" if new_log else "a", newline="")
     vw = csv.writer(vf)
     if new_log:
-        vw.writerow(["iter", *[f"found_{f}" for f in cfg.families], "score"])
+        vw.writerow(["iter", *[f"found_{f}" for f in cfg.families], "score", "vs_rule", "vs_rule_se"])
     ctx = mp.get_context("fork")
     pool = ctx.Pool(cfg.workers) if cfg.workers > 0 else None
     t0 = time.time() - secs0
+    base = None
+
+    def val_row(it_, v):
+        vw.writerow([it_, *[round(v[f], 4) for f in cfg.families], round(v["score"], 4),
+                     round(v.get("vs_rule", float("nan")), 4), round(v.get("vs_rule_se", float("nan")), 4)])
+        vf.flush()
+
+    def show(v):
+        return {k: (round(x, 4) if isinstance(x, float) else x) for k, x in v.items() if k != "per"}
+
     try:
+        if it0 < cfg.iters and cfg.val_every:
+            base = rule_baseline(pool, cfg, out_dir)
         if it0 == 0 and cfg.val_every:
-            v = validate(pool, net, cfg)
-            vw.writerow([0, *[round(v[f], 4) for f in cfg.families], round(v["score"], 4)])
-            vf.flush()
+            v = validate(pool, net, cfg, base)
+            val_row(0, v)
             best = v["score"]
-            tg.save(os.path.join(out_dir, "best.pt"), net, dict(val=v, iter=0, cfg=asdict(cfg)))
-            log(f"[targets] validation at start (the rule): {v}")
+            tg.save(os.path.join(out_dir, "best.pt"), net, dict(val=show(v), iter=0, cfg=asdict(cfg)))
+            log(f"[targets] validation at start{' (the rule)' if init is None else ''}: {show(v)}")
         for it in range(it0, cfg.iters):
             state = {k: v.detach().clone() for k, v in net.state_dict().items()}
             seeds = rng.integers(0, 2**31 - 1, cfg.episodes)
@@ -206,13 +248,12 @@ def train(cfg: TConfig, out_dir: str, init: str | None = None, resume: bool = Fa
             log(f"[targets] iter {it + 1}/{cfg.iters} decisions {len(samples)} found {row[3]:.2f} "
                 f"kl {st['kl']:.4f} ent {st['ent']:.3f} {row[-1]}s")
             if cfg.val_every and (it + 1) % cfg.val_every == 0:
-                v = validate(pool, net, cfg)
-                vw.writerow([it + 1, *[round(v[f], 4) for f in cfg.families], round(v["score"], 4)])
-                vf.flush()
+                v = validate(pool, net, cfg, base)
+                val_row(it + 1, v)
                 if v["score"] > best:
                     best = v["score"]
-                    tg.save(os.path.join(out_dir, "best.pt"), net, dict(val=v, iter=it + 1, cfg=asdict(cfg)))
-                log(f"[targets] validation: {v} (best {best:.3f})")
+                    tg.save(os.path.join(out_dir, "best.pt"), net, dict(val=show(v), iter=it + 1, cfg=asdict(cfg)))
+                log(f"[targets] validation: {show(v)} (best {best:.3f})")
             tg.save(os.path.join(out_dir, "model.pt"), net, dict(iter=it + 1, cfg=asdict(cfg)))
             tmp = ck + ".tmp"
             torch.save(dict(net=net.state_dict(), opt=opt.state_dict(), iter=it + 1, secs=time.time() - t0,

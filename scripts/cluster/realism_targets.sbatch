@@ -10,7 +10,7 @@ source "$(dirname "$0")/common.sh" 2>/dev/null || source "$SLURM_SUBMIT_DIR/scri
 source scripts/cluster/realism.env
 OUT="$REAL_RUN/targets"
 python scripts/train_targets.py --field wilderness urban --iters "$T_ITERS" --episodes "$T_EPISODES" \
-  --workers $(( CPUS - 8 )) --threads 8 --val-every 20 --val-episodes 32 --resume --out "$OUT"
+  --workers $(( CPUS - 8 )) --threads 8 --val-every 20 --val-episodes "$T_VAL_EPISODES" --resume --out "$OUT"
 M="$OUT/best.pt"; [ -f "$M" ] || M="$OUT/model.pt"
 python scripts/evaluate.py --conditions $T_CONDITIONS --episodes "$T_EVAL_EPISODES" --models "$M" --temps 0 1 \
   --workers "$CPUS" --out "$OUT/results" --tag targets | tail -3
