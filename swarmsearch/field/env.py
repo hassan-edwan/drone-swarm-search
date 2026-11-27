@@ -138,6 +138,9 @@ class FieldEnv(GridSearchEnv):
         # times a find's value; the rest is paid on actual finds. 0: finds only (evaluation is unchanged)
         self.reward_pod = 0.0
         self._pod = {}
+        # the value of a look (footprint_values, the rule and the policy's inputs) counts earlier looks per
+        # viewing direction, as the map does; False: only looks from straight above (before 2026-11-27)
+        self.view_value = False
         self.goals = {}
         self._v = View()
         self.views = None
@@ -166,12 +169,28 @@ class FieldEnv(GridSearchEnv):
         from ..camera import footprint_sum
         o = self.occ_model
         pl = np.minimum(0.98, np.clip(0.5 * self.C_model, 1e-3, 0.98) / np.maximum(1e-6, 1 - o))
-        n = self._v.N[k * sn.N_CLASS + 4]  # straight-down view at height k
 
         def f(m):
             return o + (1 - o) * (1 - pl) ** m
-        disc = (1 - f(n + 1) / f(n)) / np.maximum(1 - f(1), 1e-9)
-        return footprint_sum(self.belief * self.C_model * disc, self._v.map.G[k])
+
+        def disc(n):
+            return (1 - f(n + 1) / f(n)) / np.maximum(1 - f(1), 1e-9)
+        base = self.belief * self.C_model
+        if not self.view_value:  # every cell discounted by its looks from straight above at this height
+            return footprint_sum(base * disc(self._v.N[k * sn.N_CLASS + 4]), self._v.map.G[k])
+        # each cell of the footprint discounted by its looks from the direction it would be seen from
+        # (sensing.view_class): a cell searched from one side is worth looking at again from another (S2)
+        G = self._v.map.G[k]
+        g, r = self.grid_size, sn.R
+        out = np.zeros((g, g))
+        for oy in range(2 * r + 1):
+            for ox in range(2 * r + 1):
+                w = G[:, :, oy, ox]
+                if not w.any():
+                    continue
+                X = np.pad(base * disc(self._v.N[sn.view_class(k, ox - r, oy - r)]), r)
+                out += X[oy:oy + g, ox:ox + g] * w
+        return out
 
     # ------------------------------------------------------------------ reset
     def reset(self, seed=None, options=None):

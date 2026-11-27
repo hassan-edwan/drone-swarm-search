@@ -16,6 +16,19 @@ rollout of a base policy.
 Simplifications: teammates' future looks are not simulated (their current
 targets are already excluded, as for the rule), and the map does not spread
 during the short horizon.
+
+Options added 2026-11-27 (Phase 3 found the plain planner gains nothing):
+- team: teammates in the same radio group also fly in the simulation, to
+  their current targets and then by the rule, and their looks remove what
+  they would find (sequential planning over the team; Dec-MCTS-like intent
+  from the targets they have announced).
+- objective="time": each expected detection counts by how early it comes in
+  the mission (1 - t / mission length, as the find reward), instead of a
+  fixed discount: minimum expected time to find.
+- robust: score each candidate on this many perturbed copies of the map
+  (detection rates x0.6-1.4, a smooth log-normal distortion of the map) and
+  take the mean, so a choice that only pays if the map is exactly right
+  loses to one that pays either way.
 """
 
 from __future__ import annotations
@@ -31,9 +44,12 @@ R = cam.R
 
 
 class PlannerPolicy(BeliefGreedy):
-    def __init__(self, candidates: int = 6, horizon: int = 60, gamma: float = 0.99, sep: int = 2, **kw):
+    def __init__(self, candidates: int = 6, horizon: int = 60, gamma: float = 0.99, sep: int = 2,
+                 team: bool = False, objective: str = "discount", robust: int = 0, seed: int = 0, **kw):
         super().__init__(**kw)
         self.K, self.H, self.gamma, self.sep = candidates, horizon, gamma, sep
+        self.team, self.objective, self.robust = team, objective, robust
+        self.prng = np.random.default_rng(seed)
         self.n_changed = 0
         self.n_decisions = 0
 
@@ -83,6 +99,46 @@ class PlannerPolicy(BeliefGreedy):
         k, ty, tx = np.unravel_index(int(np.argmax(S)), S.shape)
         return (int(k), int(ty), int(tx)) if S[k, ty, tx] > 0 else None
 
+    def _weight(self, env, t):
+        if self.objective == "time":
+            T = getattr(getattr(env, "fam", None), "max_steps", 0) or 1
+            return max(0.0, 1.0 - (env.t + t) / T)
+        return self.gamma ** t
+
+    def _mates(self, env, a):
+        """Teammates sharing a's map, with the targets they have announced."""
+        if not self.team:
+            return []
+        out = []
+        for b in env.agents:
+            if b == a or not env.alive.get(b) or env.view_of(b) is not env.view_of(a) or b not in self.cam_targets:
+                continue
+            (tx, ty), k, v0 = self.cam_targets[b]
+            out.append(dict(x=int(env.pos[b][0]), y=int(env.pos[b][1]), alt=int(env.alt[b]), k=k, tx=tx, ty=ty, v0=v0))
+        return out
+
+    def _mate_step(self, env, m, b, fv, pd, G, taken, t):
+        """One step of a simulated teammate: climb/descend, else a cell towards its target, then look."""
+        if m["alt"] != m["k"]:
+            m["alt"] += 1 if m["k"] > m["alt"] else -1
+        else:
+            if (m["x"], m["y"]) == (m["tx"], m["ty"]) or fv[m["k"], m["ty"], m["tx"]] < self.drop * m["v0"]:
+                nxt = self._pick(env, fv, taken, m["x"], m["y"], m["alt"])
+                if nxt is None:
+                    return 0.0
+                m["k"], m["ty"], m["tx"] = nxt
+                m["v0"] = fv[nxt]
+            Df = self._field(env, (m["tx"], m["ty"]))
+            best = None
+            for dx, dy in MOVES[:8]:
+                nx, ny = m["x"] + int(dx), m["y"] + int(dy)
+                if 0 <= nx < Df.shape[1] and 0 <= ny < Df.shape[0] and np.isfinite(Df[ny, nx]):
+                    if best is None or Df[ny, nx] < best[0]:
+                        best = (Df[ny, nx], nx, ny)
+            if best is not None and best[0] < Df[m["y"], m["x"]]:
+                m["x"], m["y"] = best[1], best[2]
+        return self._weight(env, t) * self._look(b, fv, pd, G, m["x"], m["y"], m["alt"], sn.BLUR)
+
     def _rollout(self, env, a, first, V, taken, model):
         pd, G, b0 = model
         b = b0.copy()
@@ -93,10 +149,15 @@ class PlannerPolicy(BeliefGreedy):
         v0 = fv[k, ty, tx]
         total, t = 0.0, 0
         sprint = getattr(env, "has_sprint", False)
+        mates = [dict(m) for m in self._mates(env, a)]
+        # a teammate's own claim area stays taken for it; the candidate's for us
+        team_total = 0.0
         while t < self.H:
+            for m in mates:  # teammates look first each step (their removals count for the team, not for a)
+                team_total += self._mate_step(env, m, b, fv, pd, G, taken, t)
             if alt != k:
                 alt += 1 if k > alt else -1
-                total += self.gamma ** t * self._look(b, fv, pd, G, x, y, alt, 1.0)
+                total += self._weight(env, t) * self._look(b, fv, pd, G, x, y, alt, 1.0)
                 t += 1
                 continue
             if (x, y) == (tx, ty) or fv[k, ty, tx] < self.drop * v0:
@@ -108,7 +169,7 @@ class PlannerPolicy(BeliefGreedy):
                 if alt != k:
                     continue
                 if (x, y) == (tx, ty):  # hover and look again
-                    total += self.gamma ** t * self._look(b, fv, pd, G, x, y, alt, 1.0)
+                    total += self._weight(env, t) * self._look(b, fv, pd, G, x, y, alt, 1.0)
                     t += 1
                     continue
             Df = self._field(env, (tx, ty))
@@ -129,9 +190,20 @@ class PlannerPolicy(BeliefGreedy):
             if not moved:  # stuck (no way closer): the rule would re-pick; stop the rollout here
                 break
             motion = sn.SPRINT_BLUR if n_cells == 2 else sn.BLUR
-            total += self.gamma ** t * self._look(b, fv, pd, G, x, y, alt, motion)
+            total += self._weight(env, t) * self._look(b, fv, pd, G, x, y, alt, motion)
             t += 1
-        return total
+        # with teammates simulated, the candidate is judged by what the whole team finds
+        return total + team_total if mates else total
+
+    def _perturb(self, model):
+        """The map as it might really be: detection rates off by a common factor, and a smooth distortion."""
+        pd, G, b = model
+        from .field.terrain import smooth_noise as smooth_field
+        s = float(np.exp(self.prng.normal(0.0, 0.25)))  # about x0.6-x1.6
+        f = np.exp(0.5 * (smooth_field(self.prng, b.shape[0], 4) - 0.5) * 2.0)
+        b2 = b * f
+        b2 *= b.sum() / max(b2.sum(), 1e-12)
+        return np.minimum(pd * s, 0.98), G, b2
 
     # -------------------------------------------------------------- choosing
     def candidates(self, S):
@@ -155,7 +227,14 @@ class PlannerPolicy(BeliefGreedy):
         if len(cands) <= 1:
             return rule
         model = self._model(env, a)
-        vals = [self._rollout(env, a, c, V, taken, model) for c in cands]
+        if self.robust > 0:
+            vals = np.zeros(len(cands))
+            for _ in range(self.robust):
+                m2 = self._perturb(model)
+                vals += np.array([self._rollout(env, a, c, V, taken, m2) for c in cands])
+            vals = list(vals / self.robust)
+        else:
+            vals = [self._rollout(env, a, c, V, taken, model) for c in cands]
         best = cands[int(np.argmax(vals))]
         self.n_decisions += 1
         self.n_changed += int(best != rule)
