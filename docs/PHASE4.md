@@ -71,7 +71,15 @@ advantages normalised per family, one mission per worker.
 
 ## Results
 
-*Being measured: the rule and each search option on the same 40 missions per condition (scripts/paired_eval.py).*
+*Not measured yet.* A 40-mission comparison on a 4-core machine ran out of time (the planners take
+minutes per mission); the full one is a cluster job, 200 missions per condition:
+
+    sbatch -A <account> --job-name=swarm-compare --cpus-per-task=64 --time=08:00:00 \
+        --output=logs/%x-%j.out --wrap "source scripts/cluster/common.sh && python scripts/paired_eval.py \
+        --methods rule rule_view rule_adaptive planner planner_team planner_robust --episodes 200 \
+        --workers \$CPUS --out runs/realism/compare.json"
+
+`view_value` stays off by default until this shows it helps.
 
 ## Running it
 
