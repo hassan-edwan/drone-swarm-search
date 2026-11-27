@@ -1,0 +1,49 @@
+{
+ "wilderness": {
+  "n_spots": 96,
+  "under_p_3d": 0.71875,
+  "under_s": 44.29418258487667,
+  "exec": {
+   "n": 96,
+   "p_collide": 0.03125,
+   "p_abort": 0.052083333333333336,
+   "p_reach": 0.6875,
+   "extra_s": 8.565741636397489
+  },
+  "hits": [
+   "foliage"
+  ],
+  "under_p": 0.25
+ },
+ "urban": {
+  "n_spots": 96,
+  "under_p_3d": 0.8020833333333334,
+  "under_s": 31.635966543151437,
+  "exec": {
+   "n": 96,
+   "p_collide": 0.010416666666666666,
+   "p_abort": 0.03125,
+   "p_reach": 0.7604166666666666,
+   "extra_s": 9.53637777154519
+  },
+  "hits": [
+   "foliage"
+  ],
+  "under_p": 0.27898550724637683
+ },
+ "flood": {
+  "n_spots": 96,
+  "under_p_3d": 0.96875,
+  "under_s": 31.22763354882865,
+  "exec": {
+   "n": 96,
+   "p_collide": 0.0,
+   "p_abort": 0.010416666666666666,
+   "p_reach": 0.9583333333333334,
+   "extra_s": 15.8825341514912
+  },
+  "hits": [],
+  "under_p": 0.33695652173913043
+ },
+ "_about": "scripts/family_exec.py: under-canopy checks planned on synthetic 3D maps of generated worlds and flown in a real-world draw (forward depth camera, camera navigation, 5 m/s wind). 12 worlds x 8 spots per family. under_p: the real hamlet site's measured 0.25, scaled by each family's 3D reach relative to generated wilderness (synthetic forest is more open than the lidar forest); under_p_3d: the 3D reach itself."
+}

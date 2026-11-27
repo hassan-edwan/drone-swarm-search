@@ -324,6 +324,9 @@ def make_world(rng, sc) -> World:
         return w
     if sc.family == "wilderness" and sc.expand:
         big = wilderness(rng, EXPAND * fam.grid, fam.cell_m, sc.map_error, core=fam.grid)
+        if getattr(sc, "season", "summer") == "winter":
+            big.canopy, big.map_canopy = big.canopy * 0.5, big.map_canopy * 0.5
+        _hazards(big, sc, rng)
         o = tuple(int(np.clip(c - fam.grid // 2, 0, big.g - fam.grid)) for c in big.base)
         w = crop_world(big, o, fam.grid)
         w.extra.update(big=big, origin=o)
@@ -333,12 +336,22 @@ def make_world(rng, sc) -> World:
         if getattr(sc, "season", "summer") == "winter":  # mixed forest leaf-off: about half the cover
             w.canopy = w.canopy * 0.5
             w.map_canopy = w.map_canopy * 0.5
-        return w
-    if sc.family == "urban":
-        return urban(rng, fam.grid, fam.cell_m, sc.collapse_frac, sc.map_error)
-    if sc.family == "flood":
-        return flood(rng, fam.grid, fam.cell_m, sc.map_error)
-    raise ValueError(sc.family)
+    elif sc.family == "urban":
+        w = urban(rng, fam.grid, fam.cell_m, sc.collapse_frac, sc.map_error)
+    elif sc.family == "flood":
+        w = flood(rng, fam.grid, fam.cell_m, sc.map_error)
+    else:
+        raise ValueError(sc.family)
+    _hazards(w, sc, rng)
+    return w
+
+
+def _hazards(w, sc, rng):
+    """Obstacles and local conditions for a generated world (field/hazards.py), drawn from their own
+    random stream so the world's other layers are the same with or without them."""
+    if getattr(sc, "hazards", True):
+        from . import hazards
+        hazards.add(w, sc, np.random.default_rng([int(rng.integers(2 ** 31)), 7]))
 
 
 EXPAND = 2  # the search area can grow to this many times its width (K2)
@@ -358,7 +371,11 @@ def crop_world(w: World, o: tuple[int, int], size: int) -> World:
         return (int(np.clip(c[0] - x0, 0, size - 1)), int(np.clip(c[1] - y0, 0, size - 1)))
 
     kw = {f: cut(getattr(w, f)) for f in w.__dataclass_fields__}
-    kw.update(g=size, base=shift(w.base), ipp=shift(w.ipp), shelters=[shift(c) for c in w.shelters], extra={})
+    keep = {k: cut(v) for k, v in w.extra.items()
+            if isinstance(v, np.ndarray) and v.ndim >= 2 and v.shape[-2:] == (w.g, w.g)}
+    if "exec" in w.extra:
+        keep["exec"] = w.extra["exec"]
+    kw.update(g=size, base=shift(w.base), ipp=shift(w.ipp), shelters=[shift(c) for c in w.shelters], extra=keep)
     return World(**kw)
 
 

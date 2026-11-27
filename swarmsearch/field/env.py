@@ -752,8 +752,16 @@ class FieldEnv(GridSearchEnv):
 
         self.w = big
         self.grid_size = G
-        self.min_level = np.zeros((G, G), int)  # generated worlds have no per-cell flight limits
-        self.under_p = self.under_s = None
+        # the wider world's per-cell flight limits and conditions (field/hazards.py; none: obstacle-free)
+        self.min_level = np.asarray(big.extra.get("min_level", np.zeros((G, G), int)))
+        self.under_p, self.under_s = big.extra.get("under_p"), big.extra.get("under_s")
+        self.land_dist = big.extra.get("land_dist")
+        self._wind_mult_all = big.extra.get("wind_mult")
+        if self.max_level < 2 and self.min_level is not None:
+            over = self.min_level > self.max_level
+            big.fly_block |= over
+            big.map_fly_block |= over
+            self.min_level = np.where(over, 3, self.min_level)
         self._M = _pool_matrix(G)
         self.G_true = sn.geo_table(big.surface, big.elev, big.walk, fam.alt_m, fam.foot_r, fam.alt_detect)
         self.water = big.water.copy()

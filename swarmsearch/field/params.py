@@ -125,6 +125,8 @@ class FieldScenario:
     rtb_on_link_loss: bool = True  # return when out of contact (D6)
     fail_per_h: float = 0.01  # in-flight failure rate (D6)
     under_canopy: bool = True  # drones check alerts in dense forest from under the trees
+    hazards: bool = True  # generated worlds: power lines, masts, cranes, tree heights, landing spots, terrain wind
+    # (field/hazards.py; real sites have their own from lidar). False: the obstacle-free worlds used before 2026-11-27
     season: str = "summer"  # "winter": leaf-off forest (better seen through from above)
     ceiling_m: float = 1e9  # low cloud or fog: no search height within 10 m of the cloud base
     bird_per_h: float = 0.01  # birds of prey: drone losses per flight hour (assumed: about 0.02 attacks/h, half evaded)
