@@ -567,7 +567,22 @@ sizes below are assumptions, not data (ASSUMPTIONS E5).
 - `hazards=False` in a scenario gives the earlier obstacle-free worlds;
   the worlds' other layers are identical either way.
 
-*Effect on the search: being measured (the rule, 100 paired missions per condition, with and without the obstacles).*
+**Effect on the search** (the rule, 100 missions per condition, each flown with and without the
+obstacles; same missions):
+
+| Condition | Found, obstacle-free | With obstacles | Paired difference | Crashes (free / with) |
+|---|---|---|---|---|
+| wild_mix | 30.0% | 26.3% | −3.7 ± 3.0 | 7 / 2 |
+| urban_mix | 75.5% | 72.0% | −3.5 ± 1.9 | 2 / 1 |
+| flood_mix_heldout | 51.3% | 51.4% | +0.2 ± 2.1 | 10 / 0 |
+| wild_long_expand | 29.2% | 23.3% | −5.8 ± 3.3 | 17 / 18 |
+
+Finds drop a few points where drones must search higher over tall trees,
+masts and cranes, and where under-canopy checks now fail or take longer.
+Crashes fall: failures near an open spot become emergency landings, and the
+wind-aware return reserve now sees the local wind (probably the larger
+part; not separated here). Results from before this change are not directly
+comparable with results after it.
 
 ## Limits
 
