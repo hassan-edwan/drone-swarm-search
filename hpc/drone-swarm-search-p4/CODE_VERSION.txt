@@ -1,1 +1,1 @@
-dd1d7d182aaf5845c0255f370d50a5b95e8ed34a Fri Nov 27 20:19:25 2026 +0000 Cluster: push_results.sh pushes run logs and tables to a results branch
+d68109d9156b3afc0b195f377e561a1989f2e320 Fri Nov 27 20:23:08 2026 +0000 Cluster jobs stop at once if the Python environment is missing or lacks packages

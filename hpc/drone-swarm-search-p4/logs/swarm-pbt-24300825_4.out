@@ -1,0 +1,9 @@
+Loading python/gcc/11.3.0/nocuda/linux-rhel8-zen2/3.10.10
+  Loading requirement: gcc/11.3.0
+python: /home/hedwan/drone-swarm-search/.venv/bin/python
+settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 1 2 RL_STEPS=100000000 N_ENVS=128 CPUS=64 RUN=runs/phase2
+8 members in runs/realism/pbt
+pbt: nothing to compare yet
+[targets] validation at start (the rule): {'wilderness': 0.2908, 'urban': 0.6847, 'score': 0.4878, 'vs_rule': 0.0, 'vs_rule_se': 0.0}
+[targets] iter 1/20 decisions 6821 found 0.46 kl 0.0000 ent 0.000 383s
+[targets] iter 2/20 decisions 4143 found 0.52 kl 0.0000 ent 0.000 464s
