@@ -112,13 +112,14 @@ class Recorder:
 
     def __init__(self, gamma: float, lam: float, keep: float, rng):
         self.gamma, self.lam, self.keep, self.rng = gamma, lam, keep, rng
+        self.force_keep = False  # keep the inputs of every decision made while set (counterfactual checks)
         self.open: dict = {}
         self.chains: dict = {}
 
     def decide(self, a, t, x, mask, idx, logp, v):
         if a in self.open:
             self._close(a, t)
-        keep = self.rng.random() < self.keep
+        keep = self.rng.random() < self.keep or self.force_keep
         self.open[a] = dict(t=t, R=0.0, v=float(v), logp=float(logp), idx=int(idx),
                             x=x.astype(np.float16) if keep else None, mask=mask if keep else None)
 
@@ -161,6 +162,7 @@ class TargetPolicy(BeliefGreedy):
         super().__init__(**kw)
         self.net, self.temperature, self.recorder, self.seed = net, temperature, recorder, seed
         self.rng = np.random.default_rng(seed)
+        self.rule_for = None  # a drone whose next choice is the rule's own (counterfactual branches)
 
     def reset(self, env):
         super().reset(env)
@@ -168,6 +170,9 @@ class TargetPolicy(BeliefGreedy):
         self.rng = np.random.default_rng([self.seed, int(getattr(env.scenario, "seed_world", 0))])
 
     def choose(self, env, a, S, V, taken, D):
+        if a == self.rule_for:
+            self.rule_for = None
+            return super().choose(env, a, S, V, taken, D)
         X, mask = inputs(env, a, S, V, taken, D)
         if not mask.any():
             return super().choose(env, a, S, V, taken, D)

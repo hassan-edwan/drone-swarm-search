@@ -18,10 +18,10 @@ def main():
     d = TConfig()
     p.add_argument("--field", nargs="+", default=list(d.families))
     for k in ("iters", "episodes", "workers", "epochs", "minibatch", "critic_warmup", "width", "seed",
-              "val_every", "val_episodes"):
+              "val_every", "val_episodes", "cf_decisions", "cf_horizon", "replay_size"):
         p.add_argument("--" + k.replace("_", "-"), type=int, default=getattr(d, k))
     for k in ("lr", "gamma", "lam", "clip", "ent_coef", "kl_rule", "vf_coef", "keep", "temperature", "beta",
-              "expand_share", "long_share", "reward_scale"):
+              "expand_share", "long_share", "reward_scale", "pod_weight", "cf_weight", "replay_share"):
         p.add_argument("--" + k.replace("_", "-"), type=float, default=getattr(d, k))
     p.add_argument("--adv-by-family", type=int, default=1, help="1: normalise advantages within each family")
     p.add_argument("--init", default=None, help="start from a saved target policy (e.g. one trained to imitate the planner)")

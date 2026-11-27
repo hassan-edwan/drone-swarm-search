@@ -51,6 +51,17 @@ class TConfig:
     val_every: int = 10
     val_episodes: int = 8
     adv_by_family: bool = True  # normalise advantages within each family (urban pays far more finds)
+    pod_weight: float = 0.0  # share of the find reward paid per look as the true chance of a detection (env.reward_pod)
+    # counterfactual rule baseline: at this many sampled steps per mission, copy the mission, give one deciding
+    # drone the rule's target instead, fly both copies cf_horizon steps with the same random numbers, and use
+    # the difference in that drone's discounted return as the decision's advantage (blended by cf_weight)
+    cf_decisions: int = 0
+    cf_horizon: int = 120
+    cf_weight: float = 1.0
+    # prioritised replay of missions (PLR): this share of each iteration's missions are seeds flown before,
+    # picked by rank of their score (mean |advantage|: where the value estimate is most wrong) and staleness
+    replay_share: float = 0.0
+    replay_size: int = 2000
     extra: dict = field(default_factory=dict)
 
 
@@ -64,26 +75,110 @@ def run_mission(args):
     """One mission with the given weights; returns the recorded decisions and metrics."""
     state, cfg, seed, temperature, record = args
     torch.set_num_threads(1)
+    import copy
     from .envs import make_env
     net = tg.TargetNet(cfg.width, cfg.beta)
     net.load_state_dict(state)
     net.eval()
     env = make_env(sampler=_sampler(cfg), seed=seed)
+    env.reward_pod = cfg.pod_weight if record else 0.0
     env.reset(seed=seed)
     rng = np.random.default_rng(seed + 1)
     rec = tg.Recorder(cfg.gamma, cfg.lam, cfg.keep, rng) if record else None
     pol = tg.TargetPolicy(net, temperature=temperature, recorder=rec, seed=seed + 2)
     pol.reset(env)
+    cf_steps = set()
+    if record and cfg.cf_decisions > 0:
+        crng = np.random.default_rng([seed, 11])
+        cf_steps = set(int(t) for t in crng.choice(max(1, env.fam.max_steps - 1), size=min(
+            2 * cfg.cf_decisions, max(1, env.fam.max_steps - 1)), replace=False))
+    pending = []  # (decision dict, drone, start step, the rule's branch return)
+    streams: dict = {}  # per drone, scaled reward per step (for the main branch's returns)
+    n_cf = 0
     while env.agents:
         t = env.t
-        _, rew, *_ = env.step(pol.act(env))
+        snap = None
+        if t in cf_steps and n_cf < cfg.cf_decisions:
+            snap = copy.deepcopy((env, pol))
+            rec.force_keep = True
+        acts = pol.act(env)
+        if rec is not None:
+            rec.force_keep = False
+        if snap is not None:
+            new = [(a, o) for a, o in rec.open.items() if o["t"] == t and o["x"] is not None]
+            if new:
+                a, o = new[int(np.random.default_rng([seed, t]).integers(len(new)))]
+                env_b, pol_b = snap
+                pol_b.recorder, pol_b.rule_for = None, a
+                acts_b = pol_b.act(env_b)
+                tb, tm = pol_b.cam_targets.get(a), pol.cam_targets.get(a)
+                if pol_b.rule_for is None and tb is not None and tm is not None and tb[:2] == tm[:2]:
+                    o["cf"] = 0.0  # the rule would have chosen the same
+                else:
+                    G = 0.0
+                    for h in range(cfg.cf_horizon):
+                        if not env_b.agents:
+                            break
+                        _, rb, *_ = env_b.step(acts_b if h == 0 else pol_b.act(env_b))
+                        G += cfg.gamma ** h * rb.get(a, 0.0) * cfg.reward_scale
+                    pending.append((o, a, t, G))
+                n_cf += 1
+        _, rew, *_ = env.step(acts)
         if rec is not None:
             rec.reward({a: r * cfg.reward_scale for a, r in rew.items()}, t)
+            for a_, r in rew.items():
+                streams.setdefault(a_, {})[t] = r * cfg.reward_scale
+    for o, a, t0, G_b in pending:  # main branch: the same drone's return over the same horizon
+        st = streams.get(a, {})
+        G_m = sum(cfg.gamma ** h * st.get(t0 + h, 0.0) for h in range(cfg.cf_horizon))
+        o["cf"] = G_m - G_b
     samples = rec.finish(env.t) if rec is not None else []
     for s in samples:
         s["fam"] = env.fam.name
+        if "cf" in s:
+            s["adv"] = (1.0 - cfg.cf_weight) * s["adv"] + cfg.cf_weight * s["cf"]
     m = env.metrics()
-    return samples, dict(found=float(m.get("found_frac", 0.0)), family=env.fam.name, decisions=len(samples))
+    score = float(np.mean([abs(s["adv"]) for s in samples])) if samples else 0.0
+    return samples, dict(found=float(m.get("found_frac", 0.0)), family=env.fam.name, decisions=len(samples),
+                         seed=seed, score=score, n_cf=sum("cf" in s for s in samples))
+
+
+class Replay:
+    """Prioritised level replay (Jiang et al. 2021): mission seeds with scores; picks by rank of score,
+    mixed with staleness (iterations since last flown) so old scores get refreshed."""
+
+    def __init__(self, size=2000, beta=0.3, rho=0.1):
+        self.size, self.beta, self.rho = size, beta, rho
+        self.score: dict = {}
+        self.last: dict = {}
+
+    def pick(self, rng, n, it):
+        if n <= 0 or len(self.score) < 2 * n:
+            return []
+        seeds = np.array(list(self.score))
+        sc = np.array([self.score[s] for s in seeds])
+        rank = np.empty(len(sc))
+        rank[np.argsort(-sc)] = np.arange(1, len(sc) + 1)
+        p_s = (1.0 / rank) ** (1.0 / self.beta)
+        p_s /= p_s.sum()
+        stale = np.array([it - self.last[s] for s in seeds], float)
+        p_c = stale / stale.sum() if stale.sum() > 0 else np.full(len(sc), 1.0 / len(sc))
+        p = (1 - self.rho) * p_s + self.rho * p_c
+        return [int(x) for x in rng.choice(seeds, size=n, replace=False, p=p)]
+
+    def update(self, seed, score, it):
+        self.score[int(seed)] = float(score)
+        self.last[int(seed)] = it
+        if len(self.score) > self.size:  # drop the lowest scores
+            for s in sorted(self.score, key=self.score.get)[:len(self.score) - self.size]:
+                del self.score[s], self.last[s]
+
+    def state(self):
+        return dict(score=self.score, last=self.last)
+
+    def load(self, d):
+        self.score = {int(k): v for k, v in d.get("score", {}).items()}
+        self.last = {int(k): v for k, v in d.get("last", {}).items()}
 
 
 def _batches(samples, size, rng):
@@ -189,12 +284,14 @@ def train(cfg: TConfig, out_dir: str, init: str | None = None, resume: bool = Fa
         net.load_state_dict(tg.load(init)[0].state_dict())
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr)
     it0, secs0, best = 0, 0.0, -1.0
+    replay_state = None
     ck = os.path.join(out_dir, "ckpt.pt")
     if resume and os.path.exists(ck):
         d = torch.load(ck, weights_only=False)
         net.load_state_dict(d["net"])
         opt.load_state_dict(d["opt"])
         it0, secs0, best = d["iter"], d["secs"], d.get("best", -1.0)
+        replay_state = d.get("replay")
         rng.bit_generator.state = d["rng"]
         torch.set_rng_state(d["torch_rng"])
         log(f"[targets] resumed at iteration {it0}")
@@ -210,6 +307,9 @@ def train(cfg: TConfig, out_dir: str, init: str | None = None, resume: bool = Fa
         vw.writerow(["iter", *[f"found_{f}" for f in cfg.families], "score", "vs_rule", "vs_rule_se"])
     ctx = mp.get_context("fork")
     pool = ctx.Pool(cfg.workers) if cfg.workers > 0 else None
+    replay = Replay(cfg.replay_size)
+    if replay_state:
+        replay.load(replay_state)
     t0 = time.time() - secs0
     base = None
 
@@ -232,11 +332,16 @@ def train(cfg: TConfig, out_dir: str, init: str | None = None, resume: bool = Fa
             log(f"[targets] validation at start{' (the rule)' if init is None else ''}: {show(v)}")
         for it in range(it0, cfg.iters):
             state = {k: v.detach().clone() for k, v in net.state_dict().items()}
-            seeds = rng.integers(0, 2**31 - 1, cfg.episodes)
+            n_rep = int(round(cfg.replay_share * cfg.episodes))
+            old = replay.pick(rng, n_rep, it)
+            seeds = list(old) + [int(x) for x in rng.integers(0, 2**31 - 1, cfg.episodes - len(old))]
             jobs = [(state, cfg, int(s), cfg.temperature, True) for s in seeds]
             res = pool.map(run_mission, jobs) if pool else list(map(run_mission, jobs))
             samples = [s for r, _ in res for s in r]
             mets = [m for _, m in res]
+            if cfg.replay_share > 0:
+                for m in mets:
+                    replay.update(m["seed"], m["score"], it)
             st = ppo_update(net, opt, samples, cfg, rng, critic_only=it < cfg.critic_warmup)
             fam_found = {f: np.mean([m["found"] for m in mets if m["family"] == f] or [np.nan]) for f in cfg.families}
             row = [it + 1, len(mets), len(samples), round(float(np.mean([m["found"] for m in mets])), 4),
@@ -257,7 +362,8 @@ def train(cfg: TConfig, out_dir: str, init: str | None = None, resume: bool = Fa
             tg.save(os.path.join(out_dir, "model.pt"), net, dict(iter=it + 1, cfg=asdict(cfg)))
             tmp = ck + ".tmp"
             torch.save(dict(net=net.state_dict(), opt=opt.state_dict(), iter=it + 1, secs=time.time() - t0,
-                            best=best, rng=rng.bit_generator.state, torch_rng=torch.get_rng_state()), tmp)
+                            best=best, rng=rng.bit_generator.state, torch_rng=torch.get_rng_state(),
+                            replay=replay.state()), tmp)
             os.replace(tmp, ck)
     finally:
         if pool:

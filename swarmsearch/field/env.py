@@ -133,6 +133,11 @@ class FieldEnv(GridSearchEnv):
         self.plan_feats = False  # Phase 2 options (field_obs_dim)
         self.guide_coef = 0.0
         self.reward = "find_time"
+        # training only: share of the find reward paid as expected finds, i.e. each look earns the chance it
+        # gives of detecting a true person not yet found (privileged: the simulator knows where they are),
+        # times a find's value; the rest is paid on actual finds. 0: finds only (evaluation is unchanged)
+        self.reward_pod = 0.0
+        self._pod = {}
         self.goals = {}
         self._v = View()
         self.views = None
@@ -628,6 +633,7 @@ class FieldEnv(GridSearchEnv):
         self.t += 1
         self._update_conditions()
         rewards = {a: -PENALTY_STEP for a in self.agents}
+        self._pod = {a: 0.0 for a in self.agents}
         live = [a for a in self.agents if self.alive[a]]
         for a in live:
             self.use_view(a)
@@ -698,8 +704,9 @@ class FieldEnv(GridSearchEnv):
         found_now = self._review()
         found_now += self._teams_step()
         per_find = FIND_TIME_REWARD * (1.0 - self.t / fam.max_steps)
-        for a in self.agents:
-            rewards[a] += per_find * found_now
+        w_pod = float(self.reward_pod)
+        for a in self.agents:  # finds are a team reward; expected detections credit the drone that looked
+            rewards[a] += (1.0 - w_pod) * per_find * found_now + w_pod * per_find * self._pod.get(a, 0.0)
         # people, water, aftershocks
         self._move_people()
         if self.t == self._report_t:
@@ -1030,6 +1037,8 @@ class FieldEnv(GridSearchEnv):
                 rgb = self.C_rgb[cy, cx] * ppl.vis[i] * (2.0 if ppl.signalling[i] else 1.0)
                 th = self.C_th[cy, cx] * ppl.warm[i]
                 p = Gt[oy, ox] * max(rgb, th) * post * motion * slant * sc.sensor_scale
+                if self.reward_pod:  # expected detection of this person by this look
+                    self._pod[a] = self._pod.get(a, 0.0) + min(0.98, p / max(1e-6, 1 - o))
                 if rng.random() < min(0.98, p / max(1e-6, 1 - o)):
                     seen_i = int(i)
                     break
@@ -1140,6 +1149,8 @@ class FieldEnv(GridSearchEnv):
         for i in here:
             hide = 0.6 if ppl.hiding[i] else 0.0
             p = UNDER_DETECT * max(ppl.vis[i], ppl.warm[i]) * (1 - hide) * sc.sensor_scale / 0.75
+            if self.reward_pod:
+                self._pod[a] = self._pod.get(a, 0.0) + min(0.98, p)
             if rng.random() < min(0.98, p):
                 seen_i = int(i)
                 break
