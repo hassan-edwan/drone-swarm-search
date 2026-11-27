@@ -508,6 +508,67 @@ turning back and its extra time in the field simulator. On the cluster,
 - **Other aircraft.** A helicopter working the search closes airspace for
   a while: the simulator's temporary no-fly zones (`p_tfr`, D8) cover it.
 
+## 10. Generated worlds: obstacles, landing spots, wind and season (`swarmsearch/field/hazards.py`)
+
+Sections 3-9 apply to the real sites. Until 2026-11-27 the generated worlds
+(every wilderness, urban and flood mission used for training and most
+evaluation) had no obstacles above the ground except urban buildings, no
+landing spots, uniform wind, and under-canopy checks that always worked.
+Now each generated world gets the same per-cell layers the real sites get
+from `flight_limits.npz`, drawn from the world's own layers. The rates and
+sizes below are assumptions, not data (ASSUMPTIONS E5).
+
+- **Obstacles, by family:**
+  - *Wilderness:* an access road from the trailhead to the nearest edge
+    with a distribution line on 10 m poles (80% of maps); a high-voltage
+    line across the map on 30 m pylons in a ~40 m cleared corridor (35%);
+    a guyed mast of 40-110 m on high ground (30%), guy wires out to 0.6 of
+    its height. Trees 15-30 m.
+  - *Urban:* distribution lines along half the long street runs (wires up
+    to 9.5 m); a construction crane of 40-70 m with a 30-60 m jib (30%);
+    masts on a fifth of the tall roofs. Street and park trees 8-18 m.
+  - *Flood:* a road along each valley side above the water with a
+    distribution line; a high-voltage line across the valley (40%).
+    Riparian trees 10-25 m.
+- **Flight limits.** Each cell's lowest search height clears its highest
+  obstacle by 5 m (as on the real sites); none does: a no-fly cell. On
+  average 10% of urban cells need the middle height or more and 1.6% are
+  no-fly (cranes); 25% of flood cells need the middle height (tall
+  riparian trees above the 20 m low height); wilderness is limited only
+  near masts.
+- **Emergency landing spots:** open (tree cover under 0.3), no building,
+  dry, under 15°, no line overhead. Distance to the nearest one per cell;
+  a failure within 150 m of one is an emergency landing, else a crash.
+- **Wind** at the middle search height per cell and direction, from the
+  terrain and tree heights (`windfield.py`): 0.6-1.5 times open ground in
+  generated wilderness, close to 1 in urban and flood.
+- **Season:** winter halves urban and flood tree cover seen from above, as
+  in generated wilderness (growing-area missions now get it too; they
+  missed it before).
+- **Under-canopy checks** (`scripts/family_exec.py`, `exec_family.json`):
+  for each family, 3D patches (1 m voxels) are built around dense-forest
+  cells of 12 generated worlds (crowns and trunks from the cover and tree
+  heights, undergrowth, buildings, the drawn power lines pole by pole with
+  service wires), the real-world draw of section 8 is added, and 8 checks
+  per world are planned on the map and flown in the real world (forward
+  depth camera, camera navigation, 5 m/s wind):
+
+  | Family | Planner within sight (3D) | Collided | Turned back | Extra time | Reach used |
+  |---|---|---|---|---|---|
+  | wilderness | 72% | 3% (foliage) | 5% | +9 s | 25% |
+  | urban (parks) | 80% | 1% (foliage) | 3% | +10 s | 28% |
+  | flood | 97% | 0% | 1% | +16 s | 34% |
+
+  Synthetic forest is easier to get into than the lidar forest even with
+  85% undergrowth (the planner reaches 72% of spots, against 25% on the
+  hamlet site), so the reach the simulator uses is the real site's,
+  scaled by each family's 3D reach relative to generated wilderness. The
+  collisions, turn-backs and extra time come from the 3D runs.
+- `hazards=False` in a scenario gives the earlier obstacle-free worlds;
+  the worlds' other layers are identical either way.
+
+*Effect on the search: being measured (the rule, 100 paired missions per condition, with and without the obstacles).*
+
 ## Limits
 
 - The lidar is from 2021 and leaf-off; summer cover is estimated from crown
