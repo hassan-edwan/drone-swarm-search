@@ -290,6 +290,8 @@ def train(cfg: TConfig, out_dir: str, init: str | None = None, resume: bool = Fa
         d = torch.load(ck, weights_only=False)
         net.load_state_dict(d["net"])
         opt.load_state_dict(d["opt"])
+        for pg in opt.param_groups:  # the configured rate wins (population-based tuning changes it)
+            pg["lr"] = cfg.lr
         it0, secs0, best = d["iter"], d["secs"], d.get("best", -1.0)
         replay_state = d.get("replay")
         rng.bit_generator.state = d["rng"]
