@@ -2,3 +2,24 @@ Loading python/gcc/11.3.0/nocuda/linux-rhel8-zen2/3.10.10
   Loading requirement: gcc/11.3.0
 python: /home/hedwan/drone-swarm-search/.venv/bin/python
 settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 1 2 RL_STEPS=100000000 N_ENVS=128 CPUS=64 RUN=runs/phase2
+| Condition | Method | Found | vs rule (paired) | Time-weighted find | s / mission |
+|---|---|---|---|---|---|
+| wild_mix | rule | 0.338 |  | 0.736 | 6 |
+| wild_mix | rule_view | 0.317 | -0.022 ± 0.012 | 0.753 | 6 |
+| wild_mix | rule_adaptive | 0.311 | -0.028 ± 0.021 | 0.747 | 5 |
+| wild_mix | planner | 0.380 | +0.042 ± 0.026 | 0.700 | 51 |
+| wild_mix | planner_team | 0.352 | +0.014 ± 0.024 | 0.734 | 117 |
+| wild_mix | planner_robust | 0.345 | +0.007 ± 0.027 | 0.727 | 295 |
+| urban_mix | rule | 0.724 |  | 0.478 | 7 |
+| urban_mix | rule_view | 0.723 | -0.001 ± 0.012 | 0.478 | 9 |
+| urban_mix | rule_adaptive | 0.706 | -0.018 ± 0.011 | 0.486 | 8 |
+| urban_mix | planner | 0.696 | -0.028 ± 0.013 | 0.501 | 48 |
+| urban_mix | planner_team | 0.704 | -0.020 ± 0.013 | 0.485 | 95 |
+| urban_mix | planner_robust | 0.705 | -0.019 ± 0.013 | 0.483 | 267 |
+| flood_mix_heldout | rule | 0.504 |  | 0.670 | 6 |
+| flood_mix_heldout | rule_view | 0.495 | -0.009 ± 0.013 | 0.674 | 8 |
+| flood_mix_heldout | rule_adaptive | 0.464 | -0.040 ± 0.015 | 0.697 | 6 |
+| flood_mix_heldout | planner | 0.486 | -0.018 ± 0.014 | 0.671 | 42 |
+| flood_mix_heldout | planner_team | 0.483 | -0.021 ± 0.015 | 0.688 | 84 |
+| flood_mix_heldout | planner_robust | 0.475 | -0.030 ± 0.016 | 0.690 | 227 |
+(3600 missions, 4472 s)

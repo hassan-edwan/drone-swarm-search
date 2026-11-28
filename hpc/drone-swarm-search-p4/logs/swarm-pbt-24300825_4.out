@@ -7,3 +7,251 @@ pbt: nothing to compare yet
 [targets] validation at start (the rule): {'wilderness': 0.2908, 'urban': 0.6847, 'score': 0.4878, 'vs_rule': 0.0, 'vs_rule_se': 0.0}
 [targets] iter 1/20 decisions 6821 found 0.46 kl 0.0000 ent 0.000 383s
 [targets] iter 2/20 decisions 4143 found 0.52 kl 0.0000 ent 0.000 464s
+[targets] iter 3/20 decisions 5435 found 0.59 kl 0.0000 ent 0.000 557s
+[targets] iter 4/20 decisions 6479 found 0.43 kl 0.0015 ent 2.588 708s
+[targets] iter 5/20 decisions 6058 found 0.52 kl 0.0057 ent 2.541 812s
+[targets] iter 6/20 decisions 5440 found 0.49 kl 0.0039 ent 2.527 905s
+[targets] iter 7/20 decisions 5763 found 0.45 kl 0.0029 ent 2.490 1040s
+[targets] iter 8/20 decisions 6069 found 0.50 kl 0.0025 ent 2.624 1158s
+[targets] iter 9/20 decisions 7282 found 0.45 kl 0.0015 ent 2.561 1287s
+[targets] iter 10/20 decisions 6443 found 0.45 kl 0.0019 ent 2.430 1415s
+[targets] iter 11/20 decisions 5660 found 0.53 kl 0.0017 ent 2.616 1530s
+[targets] iter 12/20 decisions 5850 found 0.47 kl 0.0030 ent 2.560 1653s
+[targets] iter 13/20 decisions 5721 found 0.48 kl 0.0028 ent 2.477 1762s
+[targets] iter 14/20 decisions 5755 found 0.55 kl 0.0033 ent 2.384 1876s
+[targets] iter 15/20 decisions 5401 found 0.48 kl 0.0037 ent 2.416 1986s
+[targets] iter 16/20 decisions 5411 found 0.54 kl 0.0077 ent 2.375 2084s
+[targets] iter 17/20 decisions 5637 found 0.50 kl 0.0048 ent 2.564 2209s
+[targets] iter 18/20 decisions 5869 found 0.43 kl 0.0155 ent 2.613 2334s
+[targets] iter 19/20 decisions 6482 found 0.32 kl 0.0134 ent 2.521 2482s
+[targets] iter 20/20 decisions 6461 found 0.46 kl 0.0068 ent 2.726 2607s
+[targets] validation: {'wilderness': 0.2983, 'urban': 0.6898, 'score': 0.4941, 'vs_rule': 0.0063, 'vs_rule_se': 0.0128} (best 0.494)
+pbt: member 4 keeps its weights (vs_rule +0.006)
+[targets] resumed at iteration 20
+[targets] iter 21/40 decisions 5514 found 0.45 kl 0.0092 ent 2.615 2847s
+[targets] iter 22/40 decisions 5299 found 0.49 kl 0.0033 ent 2.752 2939s
+[targets] iter 23/40 decisions 6606 found 0.50 kl 0.0020 ent 2.604 3077s
+[targets] iter 24/40 decisions 6310 found 0.50 kl 0.0046 ent 2.540 3193s
+[targets] iter 25/40 decisions 5315 found 0.53 kl 0.0021 ent 2.547 3313s
+[targets] iter 26/40 decisions 5423 found 0.49 kl 0.0016 ent 2.697 3433s
+[targets] iter 27/40 decisions 5089 found 0.56 kl 0.0027 ent 2.297 3540s
+[targets] iter 28/40 decisions 6327 found 0.44 kl 0.0022 ent 2.747 3667s
+[targets] iter 29/40 decisions 5851 found 0.51 kl 0.0031 ent 2.647 3794s
+[targets] iter 30/40 decisions 5674 found 0.48 kl 0.0031 ent 2.472 3916s
+[targets] iter 31/40 decisions 6360 found 0.54 kl 0.0046 ent 2.239 4041s
+[targets] iter 32/40 decisions 5046 found 0.53 kl 0.0067 ent 2.608 4146s
+[targets] iter 33/40 decisions 5547 found 0.52 kl 0.0135 ent 2.634 4268s
+[targets] iter 34/40 decisions 5593 found 0.55 kl 0.0083 ent 2.687 4389s
+[targets] iter 35/40 decisions 4489 found 0.53 kl 0.0126 ent 2.620 4502s
+[targets] iter 36/40 decisions 6096 found 0.47 kl 0.0065 ent 2.553 4622s
+[targets] iter 37/40 decisions 6197 found 0.49 kl 0.0045 ent 2.476 4747s
+[targets] iter 38/40 decisions 5937 found 0.51 kl 0.0049 ent 2.603 4888s
+[targets] iter 39/40 decisions 5609 found 0.52 kl 0.0090 ent 2.654 5000s
+[targets] iter 40/40 decisions 5334 found 0.63 kl 0.0093 ent 2.676 5094s
+[targets] validation: {'wilderness': 0.2975, 'urban': 0.6668, 'score': 0.4822, 'vs_rule': -0.0056, 'vs_rule_se': 0.0154} (best 0.494)
+pbt: member 4 (-0.006) copies member 6 (+0.019), new settings {'kl_rule': 0.02025430196079079, 'ent_coef': 0.002397695124299079, 'lr': 0.00021172747008189522, 'gamma': 0.998, 'pod_weight': 0.022655736916370375, 'cf_decisions': 0, 'replay_share': 0.0}
+[targets] resumed at iteration 42
+[targets] iter 43/60 decisions 6498 found 0.43 kl 0.0053 ent 2.612 5176s
+[targets] iter 44/60 decisions 5341 found 0.54 kl 0.0082 ent 2.489 5292s
+[targets] iter 45/60 decisions 6025 found 0.49 kl 0.0090 ent 2.677 5418s
+[targets] iter 46/60 decisions 5932 found 0.55 kl 0.0069 ent 2.545 5554s
+[targets] iter 47/60 decisions 5796 found 0.50 kl 0.0085 ent 2.453 5668s
+[targets] iter 48/60 decisions 7071 found 0.48 kl 0.0084 ent 2.547 5834s
+[targets] iter 49/60 decisions 5598 found 0.53 kl 0.0096 ent 2.520 5969s
+[targets] iter 50/60 decisions 6340 found 0.57 kl 0.0084 ent 2.531 6084s
+[targets] iter 51/60 decisions 6159 found 0.46 kl 0.0098 ent 2.577 6220s
+[targets] iter 52/60 decisions 5088 found 0.55 kl 0.0164 ent 2.545 6329s
+[targets] iter 53/60 decisions 5930 found 0.46 kl 0.0248 ent 2.519 6450s
+[targets] iter 54/60 decisions 5737 found 0.52 kl 0.0300 ent 2.391 6571s
+[targets] iter 55/60 decisions 6209 found 0.47 kl 0.0259 ent 2.342 6725s
+[targets] iter 56/60 decisions 5828 found 0.49 kl 0.0324 ent 2.678 6867s
+[targets] iter 57/60 decisions 5857 found 0.51 kl 0.0516 ent 2.631 7006s
+[targets] iter 58/60 decisions 6010 found 0.54 kl 0.0477 ent 2.497 7176s
+[targets] iter 59/60 decisions 6494 found 0.53 kl 0.0565 ent 2.483 7324s
+[targets] iter 60/60 decisions 5823 found 0.52 kl 0.0346 ent 2.638 7468s
+[targets] validation: {'wilderness': 0.3, 'urban': 0.6853, 'score': 0.4927, 'vs_rule': 0.0049, 'vs_rule_se': 0.0145} (best 0.507)
+pbt: member 4 keeps its weights (vs_rule +0.005)
+[targets] resumed at iteration 60
+[targets] iter 61/80 decisions 6508 found 0.39 kl 0.0247 ent 2.673 7739s
+[targets] iter 62/80 decisions 4792 found 0.54 kl 0.0295 ent 2.716 7847s
+[targets] iter 63/80 decisions 5414 found 0.51 kl 0.0324 ent 2.639 7984s
+[targets] iter 64/80 decisions 6287 found 0.46 kl 0.0292 ent 2.445 8129s
+[targets] iter 65/80 decisions 5757 found 0.55 kl 0.0400 ent 2.446 8248s
+[targets] iter 66/80 decisions 5240 found 0.45 kl 0.0576 ent 2.457 8343s
+[targets] iter 67/80 decisions 4653 found 0.57 kl 0.0436 ent 2.492 8441s
+[targets] iter 68/80 decisions 5321 found 0.49 kl 0.0594 ent 2.318 8559s
+[targets] iter 69/80 decisions 6475 found 0.49 kl 0.0483 ent 2.529 8686s
+[targets] iter 70/80 decisions 6074 found 0.55 kl 0.0510 ent 2.539 8813s
+[targets] iter 71/80 decisions 5822 found 0.58 kl 0.0528 ent 2.499 8974s
+[targets] iter 72/80 decisions 5661 found 0.49 kl 0.0686 ent 2.503 9106s
+[targets] iter 73/80 decisions 5487 found 0.54 kl 0.0568 ent 2.623 9233s
+[targets] iter 74/80 decisions 5877 found 0.54 kl 0.0652 ent 2.486 9320s
+[targets] iter 75/80 decisions 5596 found 0.53 kl 0.0635 ent 2.490 9427s
+[targets] iter 76/80 decisions 5576 found 0.42 kl 0.0735 ent 2.440 9538s
+[targets] iter 77/80 decisions 6358 found 0.53 kl 0.0556 ent 2.657 9659s
+[targets] iter 78/80 decisions 5211 found 0.48 kl 0.0384 ent 2.685 9771s
+[targets] iter 79/80 decisions 5294 found 0.52 kl 0.0356 ent 2.570 9904s
+[targets] iter 80/80 decisions 6036 found 0.53 kl 0.0380 ent 2.487 10011s
+[targets] validation: {'wilderness': 0.2825, 'urban': 0.678, 'score': 0.4803, 'vs_rule': -0.0075, 'vs_rule_se': 0.0137} (best 0.507)
+pbt: member 4 (-0.007) copies member 5 (+0.019), new settings {'kl_rule': 0.005, 'ent_coef': 0.006859234212700555, 'lr': 0.0001350503108991881, 'gamma': 0.998, 'pod_weight': 0.1405244964820472, 'cf_decisions': 2, 'replay_share': 0.25}
+[targets] resumed at iteration 74
+[targets] iter 75/100 decisions 5006 found 0.56 kl 0.0392 ent 2.820 10311s
+[targets] iter 76/100 decisions 4823 found 0.39 kl 0.0496 ent 2.567 10435s
+[targets] iter 77/100 decisions 4861 found 0.54 kl 0.0496 ent 2.659 10516s
+[targets] iter 78/100 decisions 5777 found 0.57 kl 0.0479 ent 2.706 10654s
+[targets] iter 79/100 decisions 5222 found 0.54 kl 0.0517 ent 2.635 10768s
+[targets] iter 80/100 decisions 5152 found 0.51 kl 0.0531 ent 2.715 10880s
+[targets] validation: {'wilderness': 0.3133, 'urban': 0.7196, 'score': 0.5164, 'vs_rule': 0.0287, 'vs_rule_se': 0.0142} (best 0.516)
+[targets] iter 81/100 decisions 5598 found 0.41 kl 0.0527 ent 2.685 11125s
+[targets] iter 82/100 decisions 5057 found 0.45 kl 0.0541 ent 2.616 11231s
+[targets] iter 83/100 decisions 6120 found 0.38 kl 0.0284 ent 2.811 11380s
+[targets] iter 84/100 decisions 6095 found 0.40 kl 0.0364 ent 2.608 11532s
+[targets] iter 85/100 decisions 5013 found 0.49 kl 0.0411 ent 2.873 11659s
+[targets] iter 86/100 decisions 5863 found 0.66 kl 0.0288 ent 2.912 11781s
+[targets] iter 87/100 decisions 5266 found 0.43 kl 0.0338 ent 2.712 11890s
+[targets] iter 88/100 decisions 5236 found 0.55 kl 0.0247 ent 2.853 12004s
+[targets] iter 89/100 decisions 4962 found 0.47 kl 0.0169 ent 2.896 12122s
+[targets] iter 90/100 decisions 5072 found 0.58 kl 0.0179 ent 2.908 12234s
+[targets] iter 91/100 decisions 6281 found 0.50 kl 0.0155 ent 2.643 12346s
+[targets] iter 92/100 decisions 4799 found 0.45 kl 0.0141 ent 2.902 12480s
+[targets] iter 93/100 decisions 4693 found 0.48 kl 0.0212 ent 2.755 12582s
+[targets] iter 94/100 decisions 5992 found 0.51 kl 0.0156 ent 2.823 12726s
+[targets] iter 95/100 decisions 5036 found 0.52 kl 0.0162 ent 2.599 12812s
+[targets] iter 96/100 decisions 5834 found 0.50 kl 0.0130 ent 2.590 12913s
+[targets] iter 97/100 decisions 5726 found 0.55 kl 0.0087 ent 2.802 13044s
+[targets] iter 98/100 decisions 4162 found 0.55 kl 0.0102 ent 2.545 13136s
+[targets] iter 99/100 decisions 5378 found 0.50 kl 0.0130 ent 2.893 13275s
+[targets] iter 100/100 decisions 4810 found 0.53 kl 0.0217 ent 2.812 13396s
+[targets] validation: {'wilderness': 0.3083, 'urban': 0.6947, 'score': 0.5015, 'vs_rule': 0.0137, 'vs_rule_se': 0.0137} (best 0.516)
+pbt: member 4 keeps its weights (vs_rule +0.014)
+[targets] resumed at iteration 100
+[targets] iter 101/120 decisions 5664 found 0.49 kl 0.0187 ent 2.781 13632s
+[targets] iter 102/120 decisions 5157 found 0.51 kl 0.0245 ent 2.490 13757s
+[targets] iter 103/120 decisions 4082 found 0.64 kl 0.0267 ent 2.914 13864s
+[targets] iter 104/120 decisions 5570 found 0.48 kl 0.0223 ent 2.677 13965s
+[targets] iter 105/120 decisions 5232 found 0.48 kl 0.0217 ent 2.673 14056s
+[targets] iter 106/120 decisions 4902 found 0.49 kl 0.0227 ent 2.628 14172s
+[targets] iter 107/120 decisions 6104 found 0.40 kl 0.0205 ent 3.074 14338s
+[targets] iter 108/120 decisions 4921 found 0.56 kl 0.0271 ent 2.851 14442s
+[targets] iter 109/120 decisions 5484 found 0.53 kl 0.0290 ent 2.682 14568s
+[targets] iter 110/120 decisions 6379 found 0.60 kl 0.0252 ent 2.796 14679s
+[targets] iter 111/120 decisions 4599 found 0.47 kl 0.0229 ent 2.731 14773s
+[targets] iter 112/120 decisions 5312 found 0.43 kl 0.0333 ent 2.885 14907s
+[targets] iter 113/120 decisions 4361 found 0.56 kl 0.0235 ent 2.848 14995s
+[targets] iter 114/120 decisions 6129 found 0.49 kl 0.0335 ent 2.792 15126s
+[targets] iter 115/120 decisions 4590 found 0.50 kl 0.0393 ent 2.787 15216s
+[targets] iter 116/120 decisions 5925 found 0.50 kl 0.0694 ent 2.753 15340s
+[targets] iter 117/120 decisions 5487 found 0.52 kl 0.0731 ent 2.680 15456s
+[targets] iter 118/120 decisions 5226 found 0.50 kl 0.0830 ent 2.620 15566s
+[targets] iter 119/120 decisions 4361 found 0.50 kl 0.1182 ent 2.789 15661s
+[targets] iter 120/120 decisions 5542 found 0.49 kl 0.1212 ent 2.655 15800s
+[targets] validation: {'wilderness': 0.325, 'urban': 0.7239, 'score': 0.5245, 'vs_rule': 0.0367, 'vs_rule_se': 0.0122} (best 0.524)
+pbt: member 4 keeps its weights (vs_rule +0.037)
+[targets] resumed at iteration 120
+[targets] iter 121/140 decisions 5512 found 0.53 kl 0.2261 ent 2.790 16013s
+[targets] iter 122/140 decisions 5280 found 0.52 kl 0.1759 ent 2.610 16125s
+[targets] iter 123/140 decisions 6158 found 0.55 kl 0.1726 ent 2.689 16259s
+[targets] iter 124/140 decisions 6188 found 0.49 kl 0.1442 ent 2.649 16385s
+[targets] iter 125/140 decisions 5237 found 0.55 kl 0.1439 ent 2.634 16486s
+[targets] iter 126/140 decisions 7287 found 0.49 kl 0.1528 ent 2.776 16626s
+[targets] iter 127/140 decisions 6343 found 0.54 kl 0.1362 ent 2.788 16766s
+[targets] iter 128/140 decisions 5476 found 0.58 kl 0.1348 ent 2.795 16872s
+[targets] iter 129/140 decisions 5090 found 0.56 kl 0.1520 ent 2.787 16992s
+[targets] iter 130/140 decisions 4910 found 0.43 kl 0.1243 ent 2.711 17108s
+[targets] iter 131/140 decisions 5465 found 0.48 kl 0.0964 ent 2.774 17214s
+[targets] iter 132/140 decisions 5885 found 0.53 kl 0.1249 ent 2.825 17342s
+[targets] iter 133/140 decisions 6250 found 0.50 kl 0.1303 ent 2.659 17484s
+[targets] iter 134/140 decisions 5157 found 0.49 kl 0.1347 ent 2.753 17595s
+[targets] iter 135/140 decisions 4243 found 0.47 kl 0.1278 ent 2.729 17685s
+[targets] iter 136/140 decisions 5778 found 0.59 kl 0.1259 ent 2.751 17791s
+[targets] iter 137/140 decisions 5686 found 0.54 kl 0.1497 ent 2.629 17909s
+[targets] iter 138/140 decisions 5454 found 0.56 kl 0.2028 ent 2.649 18000s
+[targets] iter 139/140 decisions 5210 found 0.50 kl 0.1355 ent 2.744 18105s
+[targets] iter 140/140 decisions 5845 found 0.53 kl 0.1392 ent 2.969 18226s
+[targets] validation: {'wilderness': 0.2817, 'urban': 0.7082, 'score': 0.4949, 'vs_rule': 0.0072, 'vs_rule_se': 0.013} (best 0.524)
+pbt: member 4 (+0.007) copies member 5 (+0.031), new settings {'kl_rule': 0.009765625, 'ent_coef': 0.005487387370160444, 'lr': 0.00026377013847497674, 'gamma': 0.99, 'pod_weight': 0.17565562060255901, 'cf_decisions': 4, 'replay_share': 0.25}
+[targets] resumed at iteration 136
+[targets] iter 137/160 decisions 5461 found 0.53 kl 0.0461 ent 2.925 18265s
+[targets] iter 138/160 decisions 6174 found 0.55 kl 0.0576 ent 2.809 18413s
+[targets] iter 139/160 decisions 5601 found 0.49 kl 0.0568 ent 2.453 18540s
+[targets] iter 140/160 decisions 4383 found 0.57 kl 0.0795 ent 2.817 18639s
+[targets] validation: {'wilderness': 0.3283, 'urban': 0.6944, 'score': 0.5114, 'vs_rule': 0.0236, 'vs_rule_se': 0.0137} (best 0.519)
+[targets] iter 141/160 decisions 6107 found 0.61 kl 0.0695 ent 2.719 18882s
+[targets] iter 142/160 decisions 5898 found 0.57 kl 0.0803 ent 2.817 19001s
+[targets] iter 143/160 decisions 4769 found 0.52 kl 0.0701 ent 2.628 19097s
+[targets] iter 144/160 decisions 5302 found 0.54 kl 0.0719 ent 2.819 19249s
+[targets] iter 145/160 decisions 5035 found 0.59 kl 0.0511 ent 2.790 19329s
+[targets] iter 146/160 decisions 5054 found 0.42 kl 0.0391 ent 2.531 19470s
+[targets] iter 147/160 decisions 5522 found 0.60 kl 0.0309 ent 2.630 19593s
+[targets] iter 148/160 decisions 4613 found 0.44 kl 0.0323 ent 2.829 19720s
+[targets] iter 149/160 decisions 5490 found 0.56 kl 0.0392 ent 2.659 19822s
+[targets] iter 150/160 decisions 5931 found 0.54 kl 0.0490 ent 2.855 19942s
+[targets] iter 151/160 decisions 6150 found 0.59 kl 0.0706 ent 2.864 20074s
+[targets] iter 152/160 decisions 5531 found 0.49 kl 0.0433 ent 3.013 20229s
+[targets] iter 153/160 decisions 4728 found 0.54 kl 0.0661 ent 2.757 20328s
+[targets] iter 154/160 decisions 5366 found 0.51 kl 0.0544 ent 2.739 20447s
+[targets] iter 155/160 decisions 4578 found 0.57 kl 0.0655 ent 2.700 20543s
+[targets] iter 156/160 decisions 5296 found 0.63 kl 0.0469 ent 2.907 20639s
+[targets] iter 157/160 decisions 6030 found 0.61 kl 0.0648 ent 2.871 20764s
+[targets] iter 158/160 decisions 5215 found 0.52 kl 0.1027 ent 2.714 20898s
+[targets] iter 159/160 decisions 5368 found 0.51 kl 0.1675 ent 2.739 21014s
+[targets] iter 160/160 decisions 5731 found 0.46 kl 0.1670 ent 2.762 21145s
+[targets] validation: {'wilderness': 0.2892, 'urban': 0.7226, 'score': 0.5059, 'vs_rule': 0.0181, 'vs_rule_se': 0.0153} (best 0.519)
+pbt: member 4 keeps its weights (vs_rule +0.018)
+[targets] resumed at iteration 160
+[targets] iter 161/180 decisions 6073 found 0.49 kl 0.1782 ent 2.628 21390s
+[targets] iter 162/180 decisions 6338 found 0.49 kl 0.1532 ent 2.734 21519s
+[targets] iter 163/180 decisions 5436 found 0.50 kl 0.1173 ent 2.704 21637s
+[targets] iter 164/180 decisions 5962 found 0.57 kl 0.1483 ent 2.928 21757s
+[targets] iter 165/180 decisions 5616 found 0.54 kl 0.1300 ent 2.812 21878s
+[targets] iter 166/180 decisions 6152 found 0.40 kl 0.1433 ent 2.481 22031s
+[targets] iter 167/180 decisions 4533 found 0.60 kl 0.1658 ent 2.628 22125s
+[targets] iter 168/180 decisions 4769 found 0.58 kl 0.1067 ent 2.672 22222s
+[targets] iter 169/180 decisions 5192 found 0.58 kl 0.0676 ent 2.830 22335s
+[targets] iter 170/180 decisions 5250 found 0.50 kl 0.0384 ent 2.776 22464s
+[targets] iter 171/180 decisions 4559 found 0.52 kl 0.0589 ent 2.788 22563s
+[targets] iter 172/180 decisions 4849 found 0.54 kl 0.0575 ent 2.703 22635s
+[targets] iter 173/180 decisions 4974 found 0.50 kl 0.0454 ent 2.764 22764s
+[targets] iter 174/180 decisions 5741 found 0.50 kl 0.0398 ent 2.829 22883s
+[targets] iter 175/180 decisions 4317 found 0.41 kl 0.0407 ent 2.886 22979s
+[targets] iter 176/180 decisions 5797 found 0.53 kl 0.0337 ent 2.893 23104s
+[targets] iter 177/180 decisions 5224 found 0.46 kl 0.0516 ent 2.839 23212s
+[targets] iter 178/180 decisions 4755 found 0.47 kl 0.0754 ent 2.743 23307s
+[targets] iter 179/180 decisions 4187 found 0.59 kl 0.0644 ent 2.806 23387s
+[targets] iter 180/180 decisions 5782 found 0.48 kl 0.0625 ent 2.865 23527s
+[targets] validation: {'wilderness': 0.2875, 'urban': 0.7025, 'score': 0.495, 'vs_rule': 0.0072, 'vs_rule_se': 0.0125} (best 0.519)
+pbt: member 4 keeps its weights (vs_rule +0.007)
+[targets] resumed at iteration 180
+[targets] iter 181/200 decisions 5033 found 0.47 kl 0.0760 ent 2.831 23758s
+[targets] iter 182/200 decisions 4969 found 0.51 kl 0.0660 ent 2.791 23863s
+[targets] iter 183/200 decisions 5153 found 0.46 kl 0.0753 ent 2.708 23988s
+[targets] iter 184/200 decisions 5294 found 0.52 kl 0.0843 ent 2.605 24108s
+[targets] iter 185/200 decisions 4748 found 0.60 kl 0.1096 ent 2.678 24190s
+[targets] iter 186/200 decisions 4817 found 0.62 kl 0.1483 ent 2.809 24266s
+[targets] iter 187/200 decisions 5150 found 0.52 kl 0.1412 ent 2.847 24391s
+[targets] iter 188/200 decisions 4819 found 0.64 kl 0.1827 ent 2.770 24478s
+[targets] iter 189/200 decisions 5092 found 0.53 kl 0.1307 ent 2.637 24582s
+[targets] iter 190/200 decisions 5552 found 0.48 kl 0.1494 ent 2.637 24709s
+[targets] iter 191/200 decisions 5193 found 0.57 kl 0.1363 ent 2.679 24838s
+[targets] iter 192/200 decisions 5109 found 0.60 kl 0.2034 ent 2.679 24939s
+[targets] iter 193/200 decisions 5449 found 0.56 kl 0.1830 ent 2.719 25041s
+[targets] iter 194/200 decisions 5707 found 0.54 kl 0.1469 ent 2.628 25148s
+[targets] iter 195/200 decisions 5278 found 0.53 kl 0.1721 ent 2.686 25265s
+[targets] iter 196/200 decisions 5528 found 0.61 kl 0.1261 ent 2.630 25365s
+[targets] iter 197/200 decisions 5384 found 0.51 kl 0.2360 ent 2.775 25481s
+[targets] iter 198/200 decisions 5709 found 0.58 kl 0.1674 ent 2.882 25597s
+[targets] iter 199/200 decisions 5534 found 0.49 kl 0.1502 ent 2.928 25729s
+[targets] iter 200/200 decisions 5134 found 0.59 kl 0.1151 ent 2.931 25843s
+[targets] validation: {'wilderness': 0.3092, 'urban': 0.707, 'score': 0.5081, 'vs_rule': 0.0203, 'vs_rule_se': 0.0123} (best 0.519)
+| Member | Iteration | vs rule | Settings |
+|---|---|---|---|
+| 0 | 200 | +0.011 | kl_rule 0.0253, ent_coef 0.00468, lr 0.000265, gamma 0.998, pod_weight 0.0181, cf_decisions 2, replay_share 0.5 |
+| 1 | 200 | -0.004 | kl_rule 0.0396, ent_coef 0.003, lr 0.000265, gamma 0.998, pod_weight 0.0181, cf_decisions 2, replay_share 0.5 |
+| 2 | 200 | -0.011 | kl_rule 0.0316, ent_coef 0.00375, lr 0.000331, gamma 0.998, pod_weight 0.0227, cf_decisions 2, replay_share 0.5 |
+| 3 | 200 | +0.003 | kl_rule 0.00781, ent_coef 0.00686, lr 0.000211, gamma 0.99, pod_weight 0.22, cf_decisions 4, replay_share 0.25 |
+| 4 | 200 | +0.020 | kl_rule 0.00977, ent_coef 0.00549, lr 0.000264, gamma 0.99, pod_weight 0.176, cf_decisions 4, replay_share 0.25 |
+| 5 | 200 | +0.016 | kl_rule 0.00781, ent_coef 0.00686, lr 0.00033, gamma 0.99, pod_weight 0.22, cf_decisions 4, replay_share 0.5 |
+| 6 | 200 | +0.021 | kl_rule 0.0122, ent_coef 0.00686, lr 0.000211, gamma 0.99, pod_weight 0.141, cf_decisions 4, replay_share 0.25 |
+| 7 | 200 | -0.004 | kl_rule 0.00625, ent_coef 0.00857, lr 0.000264, gamma 0.99, pod_weight 0.112, cf_decisions 4, replay_share 0.25 |
+
+24 exploit steps (pbt_log.jsonl)
