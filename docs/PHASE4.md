@@ -71,15 +71,39 @@ advantages normalised per family, one mission per worker.
 
 ## Results
 
-*Not measured yet.* A 40-mission comparison on a 4-core machine ran out of time (the planners take
-minutes per mission); the full one is a cluster job, 200 missions per condition:
+**Search options without learning** (cluster job 24300826; 200 missions per condition, every method on
+the same missions; paired difference from the rule in points of share found, ± one standard error):
 
-    sbatch -A <account> --job-name=swarm-compare --cpus-per-task=64 --time=08:00:00 \
-        --output=logs/%x-%j.out --wrap "source scripts/cluster/common.sh && python scripts/paired_eval.py \
-        --methods rule rule_view rule_adaptive planner planner_team planner_robust --episodes 200 \
-        --workers \$CPUS --out runs/realism/compare.json"
+| Condition | Rule found | rule_view | rule_adaptive | planner | planner_team | planner_robust |
+|---|---|---|---|---|---|---|
+| wild_mix | 33.8% | −2.2 ± 1.2 | −2.8 ± 2.1 | +4.2 ± 2.6 | +1.4 ± 2.4 | +0.7 ± 2.7 |
+| urban_mix | 72.4% | −0.1 ± 1.2 | −1.8 ± 1.1 | −2.8 ± 1.3 | −2.0 ± 1.3 | −1.9 ± 1.3 |
+| flood_mix_heldout | 50.4% | −0.9 ± 1.3 | −4.0 ± 1.5 | −1.8 ± 1.4 | −2.1 ± 1.5 | −3.0 ± 1.6 |
+| Seconds per mission | 6 | 6–9 | 5–8 | 42–51 | 84–117 | 227–295 |
 
-`view_value` stays off by default until this shows it helps.
+None of options 3–5 beats the rule. Simulating teammates and planning against perturbed maps did not
+improve on the Phase 3 planner, which itself helps only in generated wilderness (+4.2 ± 2.6, under two
+standard errors) and loses in urban and flood. Valuing looks by viewing direction is no better and
+slightly worse in wilderness; estimating sensor quality online is worse everywhere. All stay off by default.
+
+**Population-based tuning** (job 24300825; 8 members x 200 iterations; score: paired difference from
+the rule on 200 validation missions per family, standard error about 1.3 points):
+
+| Member | vs rule at 200 | Best seen |
+|---|---|---|
+| 6 | +2.1 | +3.2 |
+| 4 | +2.0 | +3.7 |
+| 5 | +1.6 | +3.6 |
+| 0 | +1.1 | +2.5 |
+| 3 | +0.3 | +1.7 |
+| 1, 7 | −0.4 | +1.8, +2.9 |
+| 2 | −1.1 | +2.8 |
+
+After 24 exploit steps the population settled on gamma 0.99, four counterfactual decisions per mission,
+a look reward of 0.14–0.22, a light pull to the rule (kl_rule 0.008–0.012) and some replay. The best
+members are 1.5 standard errors above the rule, and picking the best of eight validation scores
+inflates that. It is suggestive, not yet a win; the next step is a fresh evaluation of members 4, 5 and
+6 on missions they were not selected on, including the real sites.
 
 ## Running it
 
