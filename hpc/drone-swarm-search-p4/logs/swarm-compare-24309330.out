@@ -1,0 +1,32 @@
+Loading python/gcc/11.3.0/nocuda/linux-rhel8-zen2/3.10.10
+  Loading requirement: gcc/11.3.0
+python: /home/hedwan/drone-swarm-search/.venv/bin/python
+settings: POLICY_ARCH=mlp PLAN=--plan-feats FAMILIES=wilderness urban SEEDS=0 1 2 RL_STEPS=100000000 N_ENVS=128 CPUS=64 RUN=runs/phase2
+| Condition | Method | Found | vs rule (paired) | Time-weighted find | s / mission |
+|---|---|---|---|---|---|
+| wild_mix | rule | 0.299 |  | 0.767 | 6 |
+| wild_mix | targets:runs/realism/pbt/m06/model.pt | 0.306 | +0.007 ± 0.020 | 0.760 | 14 |
+| wild_mix | targets:runs/realism/pbt/m04/model.pt | 0.330 | +0.031 ± 0.021 | 0.747 | 14 |
+| wild_mix | targets:runs/realism/pbt/m05/model.pt | 0.303 | +0.004 ± 0.019 | 0.760 | 14 |
+| wild_mix | targets:/home/hedwan/drone-swarm-search/runs/realism/targets/model.pt | 0.318 | +0.018 ± 0.021 | 0.755 | 13 |
+| urban_mix | rule | 0.720 |  | 0.485 | 8 |
+| urban_mix | targets:runs/realism/pbt/m06/model.pt | 0.712 | -0.008 ± 0.011 | 0.486 | 9 |
+| urban_mix | targets:runs/realism/pbt/m04/model.pt | 0.727 | +0.008 ± 0.010 | 0.463 | 9 |
+| urban_mix | targets:runs/realism/pbt/m05/model.pt | 0.723 | +0.004 ± 0.010 | 0.463 | 9 |
+| urban_mix | targets:/home/hedwan/drone-swarm-search/runs/realism/targets/model.pt | 0.714 | -0.006 ± 0.009 | 0.487 | 9 |
+| flood_mix_heldout | rule | 0.480 |  | 0.683 | 6 |
+| flood_mix_heldout | targets:runs/realism/pbt/m06/model.pt | 0.471 | -0.009 ± 0.012 | 0.694 | 8 |
+| flood_mix_heldout | targets:runs/realism/pbt/m04/model.pt | 0.490 | +0.011 ± 0.012 | 0.667 | 8 |
+| flood_mix_heldout | targets:runs/realism/pbt/m05/model.pt | 0.474 | -0.005 ± 0.012 | 0.689 | 8 |
+| flood_mix_heldout | targets:/home/hedwan/drone-swarm-search/runs/realism/targets/model.pt | 0.474 | -0.006 ± 0.012 | 0.690 | 8 |
+| wild_real_catoctin | rule | 0.091 |  | 0.937 | 4 |
+| wild_real_catoctin | targets:runs/realism/pbt/m06/model.pt | 0.113 | +0.022 ± 0.013 | 0.923 | 10 |
+| wild_real_catoctin | targets:runs/realism/pbt/m04/model.pt | 0.104 | +0.013 ± 0.010 | 0.934 | 10 |
+| wild_real_catoctin | targets:runs/realism/pbt/m05/model.pt | 0.114 | +0.023 ± 0.014 | 0.923 | 9 |
+| wild_real_catoctin | targets:/home/hedwan/drone-swarm-search/runs/realism/targets/model.pt | 0.097 | +0.006 ± 0.011 | 0.934 | 10 |
+| wild_real_hamlet | rule | 0.250 |  | 0.794 | 14 |
+| wild_real_hamlet | targets:runs/realism/pbt/m06/model.pt | 0.286 | +0.036 ± 0.016 | 0.768 | 27 |
+| wild_real_hamlet | targets:runs/realism/pbt/m04/model.pt | 0.273 | +0.023 ± 0.020 | 0.777 | 27 |
+| wild_real_hamlet | targets:runs/realism/pbt/m05/model.pt | 0.284 | +0.034 ± 0.018 | 0.765 | 24 |
+| wild_real_hamlet | targets:/home/hedwan/drone-swarm-search/runs/realism/targets/model.pt | 0.294 | +0.044 ± 0.019 | 0.777 | 25 |
+(7500 missions, 1436 s)
