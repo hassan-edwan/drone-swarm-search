@@ -105,6 +105,25 @@ members are 1.5 standard errors above the rule, and picking the best of eight va
 inflates that. It is suggestive, not yet a win; the next step is a fresh evaluation of members 4, 5 and
 6 on missions they were not selected on, including the real sites.
 
+**Fresh evaluation** (job 24309330; 300 missions per condition, same missions for every method; the
+real sites were never trained on). Paired difference from the rule, points of share found:
+
+| Condition | Rule | Member 4 | Member 5 | Member 6 | Phase 3 run (24292146) |
+|---|---|---|---|---|---|
+| wild_mix | 29.9% | +3.1 ± 2.1 | +0.4 ± 1.9 | +0.7 ± 2.0 | +1.8 ± 2.1 |
+| urban_mix | 72.0% | +0.8 ± 1.0 | +0.4 ± 1.0 | −0.8 ± 1.1 | −0.6 ± 0.9 |
+| flood_mix_heldout | 48.0% | +1.1 ± 1.2 | −0.5 ± 1.2 | −0.9 ± 1.2 | −0.6 ± 1.2 |
+| wild_real_catoctin | 9.1% | +1.3 ± 1.0 | +2.3 ± 1.4 | +2.2 ± 1.3 | +0.6 ± 1.1 |
+| wild_real_hamlet | 25.0% | +2.3 ± 2.0 | +3.4 ± 1.8 | +3.6 ± 1.6 | +4.4 ± 1.9 |
+| **Generated, pooled** | | +1.6 ± 0.9 | +0.1 ± 0.8 | −0.3 ± 0.9 | +0.2 ± 0.9 |
+| **Real sites, pooled** | | +1.8 ± 1.1 | +2.9 ± 1.1 | +2.9 ± 1.0 | +2.5 ± 1.1 |
+
+On the real sites every learned policy beats the rule, by 2-3 points (2.5-2.9 standard errors for
+three of the four), i.e. 10-25% more people found there; on the generated missions they tie, except
+member 4 (+1.6 ± 0.9), the only policy ahead in every condition. The learned target policy is the first
+method to beat the rule where it matters, on terrain it was not trained on. Member 4 is the
+recommended model (`runs/realism/pbt/m04/model.pt` on the cluster).
+
 ## Running it
 
     # compare search methods on the same missions (any of: rule, rule_view, rule_adaptive, planner,
